@@ -10,12 +10,17 @@
   "repository": "https://github.com/kritird/Mnemex-Context-Graph",
   "license": "MIT",
   "keywords": [
-    "knowledge-graph",
     "agent-memory",
+    "llm-memory",
+    "long-term-memory",
+    "ai-agents",
+    "knowledge-graph",
+    "context-graph",
     "rag",
     "context-engineering",
     "spaced-repetition",
     "self-pruning",
-    "claude-code"
+    "claude-code",
+    "mcp"
   ]
 }

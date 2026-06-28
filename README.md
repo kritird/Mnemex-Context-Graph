@@ -1,6 +1,9 @@
 # Mnemex Context Graph
 
-**A self-pruning, human-memory-modeled knowledge context graph for AI agents.**
+**Long-term agent memory for LLMs — a self-pruning, human-memory-modeled knowledge context graph.**
+
+> Persistent, navigable, context-budget-aware **agent memory** with no vector database, no embedding
+> pipeline, and no server. Just Markdown in a git repo. Works as a Claude Code plugin.
 
 Mnemex (from *Mnemosyne*, the personification of memory, + the engineering suffix *-ex*) is a
 specification **and** a Claude Code plugin for capturing the durable knowledge an agent produces —
