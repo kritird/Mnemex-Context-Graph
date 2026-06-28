@@ -78,12 +78,12 @@ Mnemex ships four skills, each fronted by a slash command. They map to the verbs
 
 | Command | Skill | What it does | Mutates? |
 |---|---|---|---|
-| `/mnemex-context-graph:mnx-read` | `mnx-read` | Route → read tiered indexes in chunks → expand only needed nodes → emit a **usage manifest** → append stamps for nodes actually used. | Registry append only (pure w.r.t. knowledge). |
-| `/mnemex-context-graph:mnx-write` | `mnx-write` | Ingest the **current session** (artifact + human review points) → extract domain/pattern candidates → **reconcile** against the graph → produce a **change plan** (human gate) → apply atomically. | Yes — gated, one commit. |
-| `/mnemex-context-graph:mnx-gc` | `mnx-gc` | The maintenance pass: compact registries, recompute decay + structural strength on a **frozen snapshot**, re-tier (hot/warm/cold), tombstone dead nodes, sever edges, regenerate navigation — under a team lock, one commit. | Yes — atomic, recoverable. |
-| `/mnemex-context-graph:mnx-doctor` | `mnx-doctor` | The validator: checks every invariant (edge targets exist, index matches nodes, denormalized copies are fresh, reverse map consistent, no dangling edges) and can self-heal derived files. | Repair mode only. |
+| `/mnemex:mnx-read` | `mnx-read` | Route → read tiered indexes in chunks → expand only needed nodes → emit a **usage manifest** → append stamps for nodes actually used. | Registry append only (pure w.r.t. knowledge). |
+| `/mnemex:mnx-write` | `mnx-write` | Ingest the **current session** (artifact + human review points) → extract domain/pattern candidates → **reconcile** against the graph → produce a **change plan** (human gate) → apply atomically. | Yes — gated, one commit. |
+| `/mnemex:mnx-gc` | `mnx-gc` | The maintenance pass: compact registries, recompute decay + structural strength on a **frozen snapshot**, re-tier (hot/warm/cold), tombstone dead nodes, sever edges, regenerate navigation — under a team lock, one commit. | Yes — atomic, recoverable. |
+| `/mnemex:mnx-doctor` | `mnx-doctor` | The validator: checks every invariant (edge targets exist, index matches nodes, denormalized copies are fresh, reverse map consistent, no dangling edges) and can self-heal derived files. | Repair mode only. |
 
-A `/mnemex-context-graph:mnx-init` command scaffolds a new knowledge repo.
+A `/mnemex:mnx-init` command scaffolds a new knowledge repo.
 
 Phase-by-phase breakdowns are in
 [`docs/04-skills-commands-hooks.md`](docs/04-skills-commands-hooks.md) and
@@ -96,10 +96,10 @@ Phase-by-phase breakdowns are in
 ```bash
 # In Claude Code, add this repo as a marketplace, then install the plugin:
 /plugin marketplace add kritird/Mnemex-Context-Graph
-/plugin install mnemex-context-graph@mnemex-marketplace
+/plugin install mnemex@mnemex-marketplace
 
 # Scaffold a knowledge repo (run inside the repo you want to use as your graph):
-/mnemex-context-graph:mnx-init
+/mnemex:mnx-init
 ```
 
 Requirements: Claude Code, Python 3.9+ (standard library + `PyYAML` only — no other dependencies).

@@ -9,7 +9,7 @@
   },
   "plugins": [
     {
-      "name": "mnemex-context-graph",
+      "name": "mnemex",
       "source": "./",
       "description": "Self-pruning knowledge context graph for agents (read / write / gc / doctor)."
     }

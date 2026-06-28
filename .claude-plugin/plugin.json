@@ -1,5 +1,5 @@
 {
-  "name": "mnemex-context-graph",
+  "name": "mnemex",
   "version": "0.1.0",
   "description": "Mnemex Context Graph — a self-pruning, human-memory-modeled knowledge context graph for AI agents. Captures domain knowledge and patterns from build sessions into a file-based graph with hot/warm/cold memory tiers, lazy exponential decay, and deterministic maintenance. Skills: mnx-read, mnx-write, mnx-gc, mnx-doctor.",
   "author": {
