@@ -69,7 +69,7 @@ is reasoned about deterministically, never through a runaway usage counter.
 
 ```mermaid
 flowchart LR
-    READ([🔍 confirmed use]) -->|append {id, ts, weight}| REG[(📝 registry.md<br/><i>memtable / WAL</i>)]
+    READ([🔍 confirmed use]) -->|"append {id, ts, weight}"| REG[(📝 registry.md<br/><i>memtable / WAL</i>)]
     REG -->|replay deltas after HWM| COMP[♻️ compaction<br/><i>the LSM merge</i>]
     COMP -->|materialize strength + last_update| IDX[(🗂️ index.md<br/><i>SSTable</i>)]
     COMP -->|advance| HWM[/🚩 high-water mark/]
