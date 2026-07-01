@@ -42,6 +42,16 @@ commit.
 
 ---
 
+<div align="center">
+
+### 🧭 Start here
+
+**[✨ Features](FEATURES.md)** &nbsp;·&nbsp; **[🧭 User Journey](docs/12-user-journey.md)** &nbsp;·&nbsp; **[🔗 Multi-Graph & Teams](docs/13-multi-graph-and-team-routing.md)**
+
+</div>
+
+---
+
 ## 💡 Why this exists
 
 Agents are excellent at producing knowledge inside a session and terrible at keeping it. The two
@@ -252,6 +262,9 @@ is expanded on first use and collected in the appendix.
 | 🔟 | [`10-binding-and-graph-sync.md`](docs/10-binding-and-graph-sync.md) | How an author in any repo binds to a separate knowledge-graph repo. |
 | 1️⃣1️⃣ | [`11-staging-and-promotion.md`](docs/11-staging-and-promotion.md) | The **capture / promote** split: staging tier, atom schema, budgets, read overlay, atomic promote. |
 | 1️⃣2️⃣ | [`12-user-journey.md`](docs/12-user-journey.md) | 🧭 End-to-end journey: install → bind → daily read/capture/promote, with auto-hook touchpoints. |
+| 1️⃣3️⃣ | [`13-multi-graph-and-team-routing.md`](docs/13-multi-graph-and-team-routing.md) | 🔗 Working across many graphs, teams & orgs: which-graph vs which-team, per-graph staging, worked example. |
+
+See also: [`FEATURES.md`](FEATURES.md) (feature showcase).
 
 ---
 
