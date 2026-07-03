@@ -284,7 +284,7 @@ changed_since_last_compaction(team, cfg) -> bool
 renormalize(scope, old_lam, new_lam, now) -> plan
     # recompute stored strengths so score_new(now)==score_old(now) for every node (continuity)
 resolve_horizon(node, cfg) -> str|None    # stale_after = verified + horizon(volatility, type, cfg);
-    # None for volatility:timeless or dead/superseded (Doc 14 §3). Pure; no clock read beyond `verified`.
+    # None for volatility:timeless or a dead (retired) node (Doc 14 §3). Pure; no clock read beyond `verified`.
 ```
 
 **Invariants:** `derive`/`resolve_horizon` are deterministic; `renormalize` preserves every node's

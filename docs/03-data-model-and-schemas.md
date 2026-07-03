@@ -74,7 +74,7 @@ title: ISO 8583 Field 124 — stablecoin routing instructions
 summary: One line that lands in the index verbatim (the match + routing surface).
 aliases: [field 124, DE124, data element 124, stablecoin routing field]
 domain: [settlement]            # may be a LIST: a node can belong to >1 sub-index (routing DAG)
-status: active                  # active | superseded | archived | dead
+status: active                  # active | dead   (retired-why lives in fields: superseded-by, died)
 confidence: high                # high | medium | low
 volatility: default             # default | timeless | volatile | <int days> — freshness horizon (Doc 14)
 trigger: null                   # REQUIRED for type: pattern; null for domain (see below)
@@ -134,7 +134,7 @@ status: dead
 supersedes: null
 superseded-by: iso8583-field124-v2   # if replaced; else null
 died: 2026-09-01T00:00:00Z
-# body cleared on tombstone (default). Front-matter + id retained for audit.
+# body RETAINED on tombstone (audit + resurrection). id + front-matter kept. Hard-delete only on --purge.
 ```
 
 ---
@@ -171,7 +171,7 @@ Notes:
 - `strength`/`last_update` are the materialized decay state (Doc 02).
 - `stale_after` is the **precomputed freshness horizon** (Doc 14): read flags an atom `stale` when
   `now > stale_after`. It is denormalized from the node like `summary`/`aliases` (validator-enforced), is
-  `—`/null for `timeless` and dead/superseded nodes, and is recomputed by consolidation. It is independent
+  `—`/null for `timeless` and dead (retired) nodes, and is recomputed by consolidation. It is independent
   of `expires` (the Cold-tier death time) — a node can be stale long before it is near death, or fresh yet
   cold.
 - Hot = top-K (`hot_k`); the line count of the Hot section is therefore bounded.

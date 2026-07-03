@@ -135,7 +135,7 @@ they derive from is final.
 for each decision in pass.plan.json:        # 1. truth-level mutations first
     relabel tier in the (in-memory) index model
     if death:
-        tombstone X (status: dead, clear body, set died, keep id+front-matter)   # or hard-delete if --purge
+        tombstone X (status: dead, KEEP body, set died, keep id+front-matter)   # or hard-delete if --purge
         SEVER incident edges TRANSACTIONALLY:
             for each referrer R of X (from REVERSE + cross-links, COLD INCLUDED):
                 rewrite R.edges to drop (R→X)   # or repoint to X.superseded-by

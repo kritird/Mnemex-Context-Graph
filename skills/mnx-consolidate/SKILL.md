@@ -55,10 +55,12 @@ Mutate nothing. Build the decision set against a frozen snapshot.
 
 ## Phase B — SWEEP (serial; under the lock; one transaction)
 Apply the plan, truth-first then derived:
-1. Relabel tiers in the index model. For each death: tombstone (status `dead`, clear body, set `died`,
-   keep id + front-matter; hard-delete if `--purge`). **Transactionally sever** every incident edge
-   using the reverse map + cross-links (cold included) — rewrite each referrer to drop the edge or
-   repoint to `superseded-by`. Never leave an edge pointing at a dead node.
+1. Relabel tiers in the index model. For each death: tombstone (status `dead`, set `died`, **keep the
+   body** and id + front-matter — a dead node is retained for audit and resurrection, never hollowed;
+   hard-delete only if `--purge`). A human SUPERSEDE also sets `superseded-by` on the retired node.
+   **Transactionally sever** every incident edge using the reverse map + cross-links (cold included) —
+   rewrite each referrer to drop the edge or repoint to `superseded-by`. Never leave an edge pointing
+   at a dead node.
 1b. **Advance `verified`** for each node in the revalidation plan (step A.3b): set the node's front-matter
    `verified = max(current verified, revalidation ts)` — a monotonic node truth-write. Leave `updated` and
    the index strength **untouched** (a confirmation is not a meaning-change and not a use). Backfill a

@@ -21,7 +21,10 @@ import mnx_regen
 import mnx_resolve
 
 VALID_TYPES = {"domain", "pattern"}
-VALID_STATUS = {"active", "superseded", "archived", "dead"}
+# Two lifecycle states only: a node is either live (`active`) or retired (`dead`). "Retired why"
+# is a field, not a status — a superseding successor is recorded in `superseded-by`, and a dead
+# node KEEPS its body (audit + resurrection). (Formerly also superseded/archived — collapsed.)
+VALID_STATUS = {"active", "dead"}
 VALID_VOLATILITY = {"default", "timeless", "volatile"}
 
 

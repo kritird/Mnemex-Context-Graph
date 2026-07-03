@@ -58,9 +58,12 @@ sub-agent** (the live session's dirty context is irrelevant — atoms carry self
 
 For each staged atom the plan assigns exactly one terminal disposition:
 `CREATE` (new node, real slug id via `mnx_common.slugify`) · `MERGE`/`UPDATE` (fold into an existing
-node) · `DROP-DUP` (duplicate — discard) · `SUPERSEDE` (new version; `supersedes`/`superseded-by`
-edges, old → `status: superseded`) · `RESURRECT` (a cold match — revive). Honor the **node-size budget**:
-an over-budget body is split into multiple nodes + an edge, never truncated.
+node — **the default when a fact simply changed**; edit in place, keep the id) · `DROP-DUP`
+(duplicate — discard) · `SUPERSEDE` (**tombstone-with-successor**: CREATE the replacement node, then
+retire the old one — `status: dead`, set `superseded-by: <new-id>`, **keep its body**; repoint every
+referrer to the successor. Reserve this for when the old version must survive as its own linkable node;
+otherwise prefer UPDATE-in-place) · `RESURRECT` (a cold/dead match — revive). Honor the **node-size
+budget**: an over-budget body is split into multiple nodes + an edge, never truncated.
 
 **Freshness fields on apply (Doc 14):** any node the plan writes fresh knowledge into —
 `CREATE`/`MERGE`/`UPDATE`/`SUPERSEDE`/`RESURRECT` — gets `verified = now` (it was just re-derived under

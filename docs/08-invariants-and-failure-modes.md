@@ -44,9 +44,9 @@ documented limits, not defects.
     `created ≤ verified` and `created ≤ updated`.
 9c. **(E) `stale_after` denormalization.** For every active node, `index.stale_after ==
     resolve_horizon(node)` — the same denormalization guarantee as invariant 9. It is null iff
-    `volatility: timeless` **or** `status ∈ {dead, superseded}`.
+    `volatility: timeless` **or** `status == dead` (retired).
 9d. **(E) Timeless never auto-tombstoned.** No consolidation pass marks a `volatility: timeless` node as a
-    death candidate; a timeless node reaches `dead` only via an explicit human SUPERSEDE/archive.
+    death candidate; a timeless node reaches `dead` only via an explicit human SUPERSEDE.
 
 ### 🌡️ Tier / budget
 11. **(E) Hot bound.** Each cluster's `hot` section length ≤ `hot_k`.

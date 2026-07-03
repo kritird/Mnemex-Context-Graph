@@ -251,9 +251,9 @@ node that keeps getting rescued from cold becomes progressively *harder* to kill
 lengthens its next interval. That is the spaced-repetition curve, and it falls out naturally from
 “boost is larger when the prior score was lower.”
 
-**Death is tombstoning, not destruction** (default). A dead node's body is cleared and its status set
-to `dead`, but the record is retained for audit and supersession history; hard deletion from git is
-opt-in (`--purge`). Severing a dead node's edges is transactional (§ Maintenance Pass).
+**Death is tombstoning, not destruction** (default). A dead node's status is set to `dead` while its
+**body is retained** — kept for audit, supersession history, and possible resurrection; hard deletion
+from git is opt-in (`--purge`). Severing a dead node's edges is transactional (§ Maintenance Pass).
 
 **An honest consequence to accept:** a node that is *cold and has no incoming edges* is, by
 construction, reachable only by brute-force search — which means it is effectively already forgotten.

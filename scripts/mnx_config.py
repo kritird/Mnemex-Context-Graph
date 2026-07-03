@@ -97,11 +97,11 @@ def horizon_days(node: dict[str, Any], cfg: dict[str, Any]) -> float | None:
 def resolve_horizon(node: dict[str, Any], cfg: dict[str, Any]) -> str | None:
     """Precomputed `stale_after` = verified + horizon, as an ISO-8601 UTC string.
 
-    None ⇒ never stale: `volatility: timeless`, a dead/superseded node, or an unusable
+    None ⇒ never stale: `volatility: timeless`, a dead (retired) node, or an unusable
     `verified` timestamp. `verified` falls back to `updated`→`created` for legacy/migration
     nodes. Pure; the only clock read is the node's own `verified`. See docs/14.
     """
-    if str(node.get("status", "active")) in ("dead", "superseded"):
+    if str(node.get("status", "active")) == "dead":
         return None
     days = horizon_days(node, cfg)
     if days is None:

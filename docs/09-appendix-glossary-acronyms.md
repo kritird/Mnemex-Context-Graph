@@ -72,8 +72,9 @@ not severed, carries a no-integrity disclaimer.
 **Structural strength** — a node's retention contribution from its in-degree/centrality; the
 deterministic counterweight to usage decay that protects hubs.
 
-**Tombstone** — a dead node whose body is cleared but whose id/front-matter is retained for audit
-(default death mode; hard delete is opt-in).
+**Tombstone** — a retired node (`status: dead`) whose body **and** id/front-matter are retained for
+audit and possible resurrection (default death mode; hard delete is opt-in via `--purge`). A
+superseding replacement is recorded in the tombstone's `superseded-by` field.
 
 **Truth decay** — the failure freshness guards against: a fact staying hot (and thus trusted) long after
 its content stopped being true. Distinct from *decay*, which is about relevance, not validity.

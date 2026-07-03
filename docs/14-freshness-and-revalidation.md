@@ -181,7 +181,7 @@ Folded into the existing back-half-of-promote pass, against the frozen snapshot:
 - **Denormalization fresh (extended):** `index.stale_after == resolve_horizon(node)` for every node — the
   same class of invariant that keeps `summary`/`aliases` in sync.
 - **`verified` monotonic:** never regresses; `created ≤ verified`, `created ≤ updated`.
-- **`stale_after` null iff** `volatility: timeless` **or** `status ∈ {dead, superseded}`.
+- **`stale_after` null iff** `volatility: timeless` **or** `status == dead` (retired).
 - **Timeless never auto-tombstoned:** no consolidation pass marks a `timeless` node for death.
 
 ---

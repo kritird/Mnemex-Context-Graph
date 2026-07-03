@@ -5,7 +5,7 @@ title: Human-readable title (may change freely)
 summary: One line that lands in the index verbatim — the match + routing surface.
 aliases: [other name, abbreviation, synonym]
 domain: [sub-domain]                  # may be a LIST (a node can belong to >1 sub-index)
-status: active                        # active | superseded | archived | dead
+status: active                        # active | dead   (retired-why is a field: superseded-by, died)
 confidence: high                      # high | medium | low
 volatility: default                   # default | timeless | volatile | <int days> — freshness horizon (Doc 14)
 trigger: null                         # REQUIRED (non-null) for type: pattern; null for domain

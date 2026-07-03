@@ -77,6 +77,29 @@ def _dead_nodes(cluster: str) -> list[dict[str, Any]]:
     return out
 
 
+def _dead_hint_tags(dead_nodes: list[dict[str, Any]], cap: int = 12) -> list[str]:
+    """A thin, deduped tag surface for the retired (dead) nodes of a cluster.
+
+    The default index does not list dead nodes row-by-row — that would put tombstones back in
+    front of routing. Instead it carries this small tag line so a reader can tell, before ever
+    opening a dead node, whether the retired set is worth a look (→ RESURRECT) or can be skipped.
+    Drawn from each dead node's aliases (the match surface), then its sub-domain(s)."""
+    seen: dict[str, None] = {}
+    for n in dead_nodes:
+        for a in mnx_common.aliases_from_index(mnx_common.aliases_to_index(n.get("aliases"))):
+            key = a.strip()
+            if key and key.lower() not in {k.lower() for k in seen}:
+                seen[key] = None
+        dom = n.get("domain")
+        for d in (dom if isinstance(dom, list) else [dom] if dom else []):
+            key = str(d).strip()
+            if key and key.lower() not in {k.lower() for k in seen}:
+                seen[key] = None
+        if len(seen) >= cap:
+            break
+    return list(seen)[:cap]
+
+
 def _seed_from_index(cluster: str) -> dict[str, dict[str, Any]]:
     """Recover existing strength/last_update from a current index (head + continuations), if any."""
     state: dict[str, dict[str, Any]] = {}
@@ -172,9 +195,10 @@ def regenerate_index(cluster: str, materialized_state: Optional[dict[str, Any]] 
         rest = cold[chunk_rows:]
         cont_chunks = [rest[i:i + chunk_rows] for i in range(0, len(rest), chunk_rows)]
 
+    dead = _dead_nodes(cluster)
     _write_continuations(cluster, name, cont_chunks, cfg)
     Path(Path(cluster) / mnx_common.INDEX_FILENAME).write_text(
-        _render(name, description, children, hot, warm, head_cold, cfg, len(cont_chunks)),
+        _render(name, description, children, hot, warm, head_cold, cfg, len(cont_chunks), dead),
         encoding="utf-8")
 
 
@@ -184,9 +208,12 @@ def _regenerate_split(cluster: str, name: str, description: str, children: list[
     plus sibling warm.md / cold.md (+ cold.NNN.md chain) / dead.md opened only on demand. The
     file read most (hot) stops being rewritten by cold/dead churn; dead.md is audit-only."""
     c = Path(cluster)
+    dead_nodes = _dead_nodes(cluster)
+    dead_tags = _dead_hint_tags(dead_nodes)
     dead_rows = [{"id": n["id"], "type": n.get("type", "domain"),
                   "summary": str(n.get("summary", "")).replace("|", "\\|"),
-                  "died": n.get("died", "")} for n in _dead_nodes(cluster)]
+                  "died": n.get("died", ""),
+                  "superseded-by": n.get("superseded-by", "")} for n in dead_nodes]
 
     chunk_rows = int(cfg.get("index_chunk_rows", cfg.get("node_budget", 35)))
     cold_head, cold_cont = cold, []
@@ -209,7 +236,9 @@ def _regenerate_split(cluster: str, name: str, description: str, children: list[
         L += ["", "## Tiers                             <!-- open on demand -->"]
         L += [f"- warm → warm.md ({counts['warm']})", f"- cold → cold.md ({counts['cold']})"]
         L += [f"- cold continuation → cold.{n:03d}.md" for n in range(1, len(cold_cont) + 1)]
-        L += [f"- dead → dead.md ({counts['dead']}, audit only)"]
+        L += [f"- dead → dead.md ({counts['dead']}, retired; open only on a tag hit)"]
+        if dead_tags:
+            L += [f"  <!-- dead tags: {', '.join(dead_tags)} -->"]
     L += ["", "<!-- GENERATED ROUTER. Do not hand-edit. merge=mnx-regen. -->", ""]
     (c / mnx_common.INDEX_FILENAME).write_text("\n".join(L), encoding="utf-8")
 
@@ -217,7 +246,7 @@ def _regenerate_split(cluster: str, name: str, description: str, children: list[
     _write_tier_file(c / mnx_common.COLD_FILENAME, name, "Cold", cold_head, cfg, cold=True)
     for n, chunk in enumerate(cold_cont, start=1):
         _write_tier_file(c / f"cold.{n:03d}.md", name, "Cold", chunk, cfg, cold=True)
-    _write_dead_file(c / mnx_common.DEAD_FILENAME, name, dead_rows)
+    _write_dead_file(c / mnx_common.DEAD_FILENAME, name, dead_rows, dead_tags)
 
     # Prune stale artifacts from a prior layout / longer chain.
     for p in _continuation_paths(cluster):  # old index.NNN.md from single-file chaining
@@ -238,11 +267,17 @@ def _write_tier_file(path: Path, name: str, tier: str, rows, cfg, cold: bool) ->
     path.write_text("\n".join(L), encoding="utf-8")
 
 
-def _write_dead_file(path: Path, name: str, dead_rows: list[dict[str, Any]]) -> None:
-    L = [f"# {name} — dead tier (audit)", "> Tombstones; never read in normal routing.", "",
-         "## Dead", "| id | type | summary | died |", "|----|------|---------|------|"]
-    L += [f"| {r['id']} | {r['type']} | {r['summary']} | {r['died']} |" for r in dead_rows]
-    L += ["", "<!-- GENERATED audit tier (W3). Retained tombstones. merge=mnx-regen. -->", ""]
+def _write_dead_file(path: Path, name: str, dead_rows: list[dict[str, Any]],
+                     dead_tags: Optional[list[str]] = None) -> None:
+    L = [f"# {name} — dead tier (retired)",
+         "> Retired nodes; NOT read in normal routing. Bodies are retained (audit + resurrection).", "",
+         f"_tags: {', '.join(dead_tags) if dead_tags else '(none)'}_   "
+         "<!-- scan before opening any row; open a node only on a tag hit -->", "",
+         "## Dead", "| id | type | summary | died | superseded-by |",
+         "|----|------|---------|------|---------------|"]
+    L += [f"| {r['id']} | {r['type']} | {r['summary']} | {r['died']} | "
+          f"{r.get('superseded-by') or '—'} |" for r in dead_rows]
+    L += ["", "<!-- GENERATED audit tier (W3). Retained tombstones (bodies kept). merge=mnx-regen. -->", ""]
     path.write_text("\n".join(L), encoding="utf-8")
 
 
@@ -279,7 +314,8 @@ _SEP_COLD = "|----|------|---------|---------|----------|-------------|---------
 
 
 def _render(name: str, description: str, children: list[str],
-            hot, warm, cold, cfg, cont_count: int = 0) -> str:
+            hot, warm, cold, cfg, cont_count: int = 0,
+            dead: Optional[list[dict[str, Any]]] = None) -> str:
     L = [f"# {name} — index",
          f"> {description}   <!-- chunk 1: route on this -->", ""]
     if cont_count:
@@ -305,6 +341,15 @@ def _render(name: str, description: str, children: list[str],
         L += ["",
               "## Continuations                     <!-- chunk 1: follow only for a deep cold search -->"]
         L += [f"- index.{n:03d}.md" for n in range(1, cont_count + 1)]
+    # Retired (dead) hint: a THIN tag signal, never a routed row. Not parsed as a tier (no table),
+    # so it never enters index_node_ids / invariant 8. Read a dead node file only on a tag hit.
+    if dead:
+        tags = _dead_hint_tags(dead)
+        L += ["",
+              "## Dead                              "
+              "<!-- retired; NOT routed. Open a dead node only on a strong tag match below. -->",
+              f"<!-- {len(dead)} retired atom(s) (status: dead) as sibling node files in this cluster. -->",
+              f"_tags: {', '.join(tags) if tags else '(none)'}_"]
     L += ["",
           "<!-- GENERATED FILE. Do not hand-edit. Regenerated by mnx-promote apply and mnx-doctor --fix. -->",
           ""]
