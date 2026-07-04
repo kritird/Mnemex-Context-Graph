@@ -1,4 +1,4 @@
-# 🛡️ 08 — Invariants and Failure Modes
+# 🛡️ Invariants and Failure Modes
 
 Two halves. First, the **invariants** `mnx-doctor` enforces — the contract that keeps an LLM-authored
 graph trustworthy. Second, the **failure-mode register** — the failure modes the design must defend
@@ -39,7 +39,7 @@ documented limits, not defects.
    index for match-without-body-load.)*
 10. **(W) Materialized state present.** Every active node has `strength`/`last_update` in the index.
 
-### ⏳ Freshness (Doc 14)
+### ⏳ Freshness (Freshness & Revalidation)
 9b. **(E) `verified` monotonic + ordered.** A node's `verified` never regresses across revisions, and
     `created ≤ verified` and `created ≤ updated`.
 9c. **(E) `stale_after` denormalization.** For every active node, `index.stale_after ==
@@ -72,6 +72,9 @@ documented limits, not defects.
     a red link (demand for an unwritten node).
 20. **(I) Org-directory completeness.** Every team with nodes appears in the org directory (root
     `index.md`) with its domains.
+21. **(W) Mesh mirror consistency.** For every node, each resolved `mentions[].resolved_id` appears in
+    that node's `edges` (the front-matter `edges:` list is a generated mirror of the resolved
+    `[[wiki-links]]` — Link Reconciliation §8/§10); no resolved mention is missing its mirrored edge.
 
 `--fix` resolves all **W** items by regenerating derived files from the nodes (and registers the
 `mnx-regen` merge driver); **E** items involving truth (1, 2, 6, 7) require human/skill attention because
@@ -87,24 +90,24 @@ Each entry: the break, its mitigation, and the doc that owns the fix.
 
 | # | Failure | Mitigation | Owned by |
 |---|---|---|---|
-| F1 | **Ordering corruption** — re-tiering reads structural strength that the same pass then mutates ⇒ non-deterministic outcome. | **Snapshot-then-apply**: all decisions against a frozen view; struct measured once. | Doc 05 |
-| F2 | **Compaction race** — a read appends a stamp during replay-then-truncate ⇒ lost stamp. | **WAL high-water checkpoint**, never truncate. | Doc 02 §2 |
-| F3 | **Immortal nodes** — unbounded `strength += boost` ⇒ a node decay can never demote. | **Saturating add** (`strength_max`) / diminishing boost. | Doc 02 §1 |
-| F4 | **Clock-skew decay inversion** — negative Δt across machines/timezones turns decay into growth. | **UTC ISO-8601 via one helper** + **clamp Δt ≥ 0**. | Doc 02 §1, Doc 06 |
-| F5 | **Retroactive config drift** — editing half-life silently re-interprets stored strengths ⇒ mass flash-cold. | **config_version stamp** + one-time **re-normalization** before tier decisions. | Doc 02 §8, Doc 07 |
-| F6 | **Read-triggers-write** — read performs “overdue” compaction ⇒ dirty tree, races, mutation on read path. | **Detect-and-warn only**; never compact in `mnx-read`; at most an append-only marker. | Doc 02 §7, Doc 04 |
-| F7 | **Budget re-overflow** — sweeping cold still leaves a cluster over budget on one sub-key. | **Split along declared sub-key**; if a single sub-key exceeds budget, **escalate to human** (never auto-invent structure). | Doc 05 |
-| F8 | **Orphan cascade** — demoting/killing a node orphans a live node it was the sole inbound for. | **Sole-referrer reluctance** + **conjunction gate** (low usage AND structurally weak), checked on snapshot. | Doc 05, Doc 01 §9 |
-| F9 | **Dangling/dead edges** — tombstoned node leaves edges pointing at it; cold node missed by a partial reverse map. | **Reverse map includes cold+dead**; **transactional edge-severing** at death. | Doc 05, Doc 06 |
-| F10 | **Half-applied pass** — model times out mid-sweep. | **Plan file + single end-commit + crash-recovery** (`git checkout` to last good commit). | Doc 02 §10, Doc 05 |
-| F11 | **Cross-cluster severing race** — two `gc`s rewrite a shared referrer concurrently. | **Team-root lock**; parallel mark, **serial sweep**. | Doc 02 §9 |
-| F12 | **Cross-cluster structural blindness** — per-cluster struct misses cross-cluster in-degree ⇒ a hub looks weak and dies. | **`cross-links.md` in the snapshot**; struct = local + cross in-degree. | Doc 02 §5, Doc 03 §5 |
-| F13 | **Denormalization staleness** — re-authoring a node's summary leaves a stale index copy ⇒ matching on wrong text. | **Invariant 9** enforced by `mnx-doctor`; regenerate on write/gc apply. | Part A, Doc 06 |
-| F14 | **Usage starvation** — model under-reports the manifest ⇒ used nodes decay and wrongly go cold (silent knowledge loss). | **Mandatory disposition on every body-load**; structural strength as deterministic ballast. | Doc 01 §6, §9 |
-| F15 | **Pattern sprawl** — the same “how” authored three ways. | **`trigger` field**; match patterns on trigger, merge near-dupes at the plan gate. | Doc 01 §2 |
-| F16 | **Plugin-state contamination** — a process writes state (config, markers, locks, staging) into the plugin's own directory/git ⇒ state lost on reinstall/upgrade, dirty tree in the plugin checkout, breaks on a read-only install. | **State isolation**: graph root resolved explicitly (never cwd, never plugin path); all state in the graph repo, `~/.claude/mnemex/`, or the project's `.mnemex.md`; the plugin dir is read-only. | Doc 02 §12 |
-| F17 | **Stale-but-trusted (truth decay)** — a frequently-read fact stays hot forever while its content silently goes out of date; heat *masks* staleness, so the model confidently serves outdated knowledge. | **Freshness axis**: a separate `verified` clock + precomputed `stale_after`; `mnx-read` emits a **refresh cue** on any stale atom (independent of heat); re-confirmation advances `verified` via a weight-0 `revalidated` stamp. | Doc 14, Doc 04 |
-| F18 | **Foundational-fact death** — an eternal truth (definition/invariant) decays in heat from disuse and gets tombstoned by the cold-TTL gate. | **`volatility: timeless`** pins the node against automatic death (exempt from the conjunction gate); it can leave only by explicit SUPERSEDE. | Doc 14 §7, Doc 05 |
+| F1 | **Ordering corruption** — re-tiering reads structural strength that the same pass then mutates ⇒ non-deterministic outcome. | **Snapshot-then-apply**: all decisions against a frozen view; struct measured once. | Maintenance Pass Algorithm |
+| F2 | **Compaction race** — a read appends a stamp during replay-then-truncate ⇒ lost stamp. | **WAL high-water checkpoint**, never truncate. | Architecture §2 |
+| F3 | **Immortal nodes** — unbounded `strength += boost` ⇒ a node decay can never demote. | **Saturating add** (`strength_max`) / diminishing boost. | Architecture §1 |
+| F4 | **Clock-skew decay inversion** — negative Δt across machines/timezones turns decay into growth. | **UTC ISO-8601 via one helper** + **clamp Δt ≥ 0**. | Architecture §1, Script Contracts |
+| F5 | **Retroactive config drift** — editing half-life silently re-interprets stored strengths ⇒ mass flash-cold. | **config_version stamp** + one-time **re-normalization** before tier decisions. | Architecture §8, Configuration |
+| F6 | **Read-triggers-write** — read performs “overdue” compaction ⇒ dirty tree, races, mutation on read path. | **Detect-and-warn only**; never compact in `mnx-read`; at most an append-only marker. | Architecture §7, Skills, Commands & Hooks |
+| F7 | **Budget re-overflow** — sweeping cold still leaves a cluster over budget on one sub-key. | **Split along declared sub-key**; if a single sub-key exceeds budget, **escalate to human** (never auto-invent structure). | Maintenance Pass Algorithm |
+| F8 | **Orphan cascade** — demoting/killing a node orphans a live node it was the sole inbound for. | **Sole-referrer reluctance** + **conjunction gate** (low usage AND structurally weak), checked on snapshot. | Maintenance Pass Algorithm, Rationale & Concepts §9 |
+| F9 | **Dangling/dead edges** — tombstoned node leaves edges pointing at it; cold node missed by a partial reverse map. | **Reverse map includes cold+dead**; **transactional edge-severing** at death. | Maintenance Pass Algorithm, Script Contracts |
+| F10 | **Half-applied pass** — model times out mid-sweep. | **Plan file + single end-commit + crash-recovery** (`git checkout` to last good commit). | Architecture §10, Maintenance Pass Algorithm |
+| F11 | **Cross-cluster severing race** — two `gc`s rewrite a shared referrer concurrently. | **Team-root lock**; parallel mark, **serial sweep**. | Architecture §9 |
+| F12 | **Cross-cluster structural blindness** — per-cluster struct misses cross-cluster in-degree ⇒ a hub looks weak and dies. | **`cross-links.md` in the snapshot**; struct = local + cross in-degree. | Architecture §5, Data Model & Schemas §5 |
+| F13 | **Denormalization staleness** — re-authoring a node's summary leaves a stale index copy ⇒ matching on wrong text. | **Invariant 9** enforced by `mnx-doctor`; regenerate on write/gc apply. | Part A, Script Contracts |
+| F14 | **Usage starvation** — model under-reports the manifest ⇒ used nodes decay and wrongly go cold (silent knowledge loss). | **Mandatory disposition on every body-load**; structural strength as deterministic ballast. | Rationale & Concepts §6, §9 |
+| F15 | **Pattern sprawl** — the same “how” authored three ways. | **`trigger` field**; match patterns on trigger, merge near-dupes at the plan gate. | Rationale & Concepts §2 |
+| F16 | **Plugin-state contamination** — a process writes state (config, markers, locks, staging) into the plugin's own directory/git ⇒ state lost on reinstall/upgrade, dirty tree in the plugin checkout, breaks on a read-only install. | **State isolation**: graph root resolved explicitly (never cwd, never plugin path); all state in the graph repo, `~/.claude/mnemex/`, or the project's `.mnemex.md`; the plugin dir is read-only. | Architecture §12 |
+| F17 | **Stale-but-trusted (truth decay)** — a frequently-read fact stays hot forever while its content silently goes out of date; heat *masks* staleness, so the model confidently serves outdated knowledge. | **Freshness axis**: a separate `verified` clock + precomputed `stale_after`; `mnx-read` emits a **refresh cue** on any stale atom (independent of heat); re-confirmation advances `verified` via a weight-0 `revalidated` stamp. | Freshness & Revalidation, Skills, Commands & Hooks |
+| F18 | **Foundational-fact death** — an eternal truth (definition/invariant) decays in heat from disuse and gets tombstoned by the cold-TTL gate. | **`volatility: timeless`** pins the node against automatic death (exempt from the conjunction gate); it can leave only by explicit SUPERSEDE. | Freshness & Revalidation §7, Maintenance Pass Algorithm |
 
 ### 🌫️ Soft (documented limits, not defects)
 

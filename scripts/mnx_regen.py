@@ -1,6 +1,6 @@
 """mnx_regen.py — the `mnx-regen` git merge driver: regenerate derived files from truth (W1).
 
-See docs/13-resilient-mesh-roadmap.md §0–§2.
+See docs/link-reconciliation.md §0–§2.
 
 THE KEYSTONE. The graph has only two kinds of truth — node files and the append-only
 `registry.md`. Every other file (`index*.md`, `phonebook.md`, `cross-links.md`, the org

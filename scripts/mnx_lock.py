@@ -1,6 +1,6 @@
 """mnx_lock.py — team lock + crash recovery.
 
-See docs/02-architecture.md §9-10 and docs/06-script-contracts.md.
+See docs/architecture.md §9-10 and docs/script-contracts.md.
 
 One mutating operation per team at a time (mnx-promote apply, incl. its folded consolidate). A crash leaves a
 readable plan and (possibly) a dirty tree that recover() can roll back via `git checkout`

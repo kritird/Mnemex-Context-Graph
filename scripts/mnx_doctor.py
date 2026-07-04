@@ -1,6 +1,6 @@
 """mnx_doctor.py — invariant checks + self-heal of derived files.
 
-See docs/08-invariants-and-failure-modes.md (Part A) for the full invariant list.
+See docs/invariants-and-failure-modes.md (Part A) for the full invariant list.
 
 check() is read-only. fix() only ever rebuilds DERIVED artifacts (index, cross-links)
 from the nodes — nodes are truth and are never auto-edited by the doctor. fix() is
@@ -127,7 +127,7 @@ def check(scope: str) -> dict[str, Any]:
         for ts_field in ("created", "updated", "verified"):
             if ts_field in node and not mnx_common.is_iso_utc(str(node[ts_field])):
                 add(6, "E", nid, f"{ts_field} is not UTC ISO-8601: {node[ts_field]!r}")
-        # Freshness schema (Doc 14): volatility vocabulary + verified ordering + timeless permanence.
+        # Freshness schema (Freshness & Revalidation): volatility vocabulary + verified ordering + timeless permanence.
         if "volatility" in node and not _valid_volatility(node.get("volatility")):
             add(6, "E", nid, f"invalid volatility: {node.get('volatility')!r} "
                              "(default | timeless | volatile | positive int)")
@@ -137,7 +137,7 @@ def check(scope: str) -> dict[str, Any]:
         if str(node.get("volatility", "default")).strip().lower() == "timeless" \
                 and node.get("status") == "dead" and not node.get("superseded-by"):
             add("9d", "E", nid, "timeless node is dead without supersession "
-                                "(timeless must never be auto-tombstoned — Doc 14 §7)")
+                                "(timeless must never be auto-tombstoned — Freshness & Revalidation §7)")
         stem = Path(node["_path"]).stem
         if stem != nid:
             add(7, "E", nid, f"id does not match filename stem {stem!r} (ids never change)")
@@ -232,6 +232,21 @@ def check(scope: str) -> dict[str, Any]:
         for nid in set(expected) & set(actual):
             if expected[nid] != actual[nid]:
                 add(18, "W", nid, f"phonebook cluster_path stale ({actual[nid]} != {expected[nid]})")
+    # Mirror consistency (21, Link Reconciliation §8/§10): every resolved `mentions[]` must appear in `edges`
+    # (front-matter edges are a GENERATED mirror of the body's resolved [[wiki-links]]).
+    for cluster in mnx_common.iter_clusters(scope):
+        for nf in mnx_common.iter_node_files(cluster):
+            try:
+                node = mnx_common.parse_node(nf)
+            except Exception:
+                continue
+            edge_targets = {e.get("to") for e in (node.get("edges") or []) if isinstance(e, dict)}
+            for m in node.get("mentions") or []:
+                if isinstance(m, dict) and m.get("resolved_id") and m["resolved_id"] not in edge_targets:
+                    add(21, "W", node.get("id"),
+                        f"resolved mention [[{m.get('name')}]]→{m['resolved_id']} not mirrored in edges "
+                        "(run mnx-doctor --fix / re-run link reconciliation)")
+
     # Org directory (20): every team with nodes appears in the org index.
     org = mnx_common.parse_md_table((root / mnx_common.INDEX_FILENAME).read_text(encoding="utf-8")
                                     if (root / mnx_common.INDEX_FILENAME).is_file() else "")

@@ -41,7 +41,7 @@ commit.
 
 ### 🧭 Start here
 
-**[✨ Features](FEATURES.md)** &nbsp;·&nbsp; **[0️⃣ Overview](docs/00-overview.md)** &nbsp;·&nbsp; **[🏛️ Architecture](docs/02-architecture.md)** &nbsp;·&nbsp; **[🧭 User Journey](docs/12-user-journey.md)**
+**[✨ Features](FEATURES.md)** &nbsp;·&nbsp; **[🗺️ Overview](docs/overview.md)** &nbsp;·&nbsp; **[🏛️ Architecture](docs/architecture.md)** &nbsp;·&nbsp; **[🧭 User Journey](docs/user-journey.md)**
 
 </div>
 
@@ -78,7 +78,7 @@ flowchart LR
 ```
 
 The full reasoning behind each design choice is in
-[`docs/01-rationale-and-concepts.md`](docs/01-rationale-and-concepts.md).
+[`docs/rationale-and-concepts.md`](docs/rationale-and-concepts.md).
 
 ---
 
@@ -107,7 +107,7 @@ re-confirmed within a horizon you set (`freshness_ttl_days`), it's flagged ⏳ *
 read — even if it's hot — so the agent re-checks it against the source instead of confidently repeating
 something outdated. Confirm it's unchanged and the clock resets for one cheap stamp; find it's wrong and
 the correction flows back in through capture. (Full model:
-[`docs/14-freshness-and-revalidation.md`](docs/14-freshness-and-revalidation.md).)
+[`docs/freshness-and-revalidation.md`](docs/freshness-and-revalidation.md).)
 
 The author doesn't worry about any of this. You build; Mnemex remembers what mattered — and flags what may
 have gone stale. 🧭
@@ -240,11 +240,11 @@ existing one — and is what every other command resolves first. For a git-remot
 read-only reachability/auth pre-flight before binding and, on failure, offers a no-auth local-folder
 fallback. `/mnemex:mnx-status` is a read-only at-a-glance status: what graph is bound, its kind,
 node/tier counts per team, pending usage stamps, last gc, and a health summary. See
-[`docs/10-binding-and-graph-sync.md`](docs/10-binding-and-graph-sync.md).
+[`docs/binding-and-graph-sync.md`](docs/binding-and-graph-sync.md).
 
 Phase-by-phase breakdowns are in
-[`docs/04-skills-commands-hooks.md`](docs/04-skills-commands-hooks.md) and
-[`docs/05-maintenance-pass-algorithm.md`](docs/05-maintenance-pass-algorithm.md).
+[`docs/skills-commands-hooks.md`](docs/skills-commands-hooks.md) and
+[`docs/maintenance-pass-algorithm.md`](docs/maintenance-pass-algorithm.md).
 
 ---
 
@@ -269,7 +269,7 @@ pip install pyyaml
 > rather than failing cryptically.
 
 A complete walkthrough — from install to daily usage, with the hooks that fire automatically — is in
-[`docs/12-user-journey.md`](docs/12-user-journey.md). 🧭
+[`docs/user-journey.md`](docs/user-journey.md). 🧭
 
 ---
 
@@ -278,23 +278,23 @@ A complete walkthrough — from install to daily usage, with the hooks that fire
 The documents in [`docs/`](docs/) are written to be self-explanatory and read in order. Every acronym
 is expanded on first use and collected in the appendix.
 
-| # | Document | What it covers |
-|---|---|---|
-| 0️⃣ | [`00-overview.md`](docs/00-overview.md) | The thesis and the design goals, in brief. |
-| 1️⃣ | [`01-rationale-and-concepts.md`](docs/01-rationale-and-concepts.md) | Every core concept and *why* it is shaped that way. |
-| 2️⃣ | [`02-architecture.md`](docs/02-architecture.md) | The three-layer model, memory tiers, lazy-decay math, and *budget = ranking = forgetting*. |
-| 3️⃣ | [`03-data-model-and-schemas.md`](docs/03-data-model-and-schemas.md) | Exact file formats for node, index, registry, cross-links, config, and staged atom. |
-| 4️⃣ | [`04-skills-commands-hooks.md`](docs/04-skills-commands-hooks.md) | The skills, their command surfaces, and the hooks that do what skills cannot. |
-| 5️⃣ | [`05-maintenance-pass-algorithm.md`](docs/05-maintenance-pass-algorithm.md) | The snapshot-then-apply algorithm in full, with ordering guarantees. |
-| 6️⃣ | [`06-script-contracts.md`](docs/06-script-contracts.md) | Deterministic helper contracts (signatures, I/O, invariants). |
-| 7️⃣ | [`07-configuration.md`](docs/07-configuration.md) | The config schema, derived half-life, and config-version re-normalization. |
-| 8️⃣ | [`08-invariants-and-failure-modes.md`](docs/08-invariants-and-failure-modes.md) | The validator invariant list and the failure-mode register with mitigations. |
-| 9️⃣ | [`09-appendix-glossary-acronyms.md`](docs/09-appendix-glossary-acronyms.md) | Glossary, acronym expansions, parameter reference, FAQ, references. |
-| 🔟 | [`10-binding-and-graph-sync.md`](docs/10-binding-and-graph-sync.md) | How an author in any repo binds to a separate knowledge-graph repo. |
-| 1️⃣1️⃣ | [`11-staging-and-promotion.md`](docs/11-staging-and-promotion.md) | The **capture / promote** split: staging tier, atom schema, budgets, read overlay, atomic promote. |
-| 1️⃣2️⃣ | [`12-user-journey.md`](docs/12-user-journey.md) | 🧭 End-to-end journey: install → bind → daily read/capture/promote, with auto-hook touchpoints. |
-| 1️⃣3️⃣ | [`13-multi-graph-and-team-routing.md`](docs/13-multi-graph-and-team-routing.md) | 🔗 Working across many graphs, teams & orgs: which-graph vs which-team, per-graph staging, worked example. |
-| 1️⃣4️⃣ | [`14-freshness-and-revalidation.md`](docs/14-freshness-and-revalidation.md) | ⏳ The **freshness** axis: `verified` clock, `stale_after`, read-time refresh cue, `volatility`, timeless-never-dies. |
+| Document | What it covers |
+|---|---|
+| [`overview.md`](docs/overview.md) | The thesis and the design goals, in brief. |
+| [`rationale-and-concepts.md`](docs/rationale-and-concepts.md) | Every core concept and *why* it is shaped that way. |
+| [`architecture.md`](docs/architecture.md) | The three-layer model, memory tiers, lazy-decay math, and *budget = ranking = forgetting*. |
+| [`data-model-and-schemas.md`](docs/data-model-and-schemas.md) | Exact file formats for node, index, registry, cross-links, config, and staged atom. |
+| [`skills-commands-hooks.md`](docs/skills-commands-hooks.md) | The skills, their command surfaces, and the hooks that do what skills cannot. |
+| [`maintenance-pass-algorithm.md`](docs/maintenance-pass-algorithm.md) | The snapshot-then-apply algorithm in full, with ordering guarantees. |
+| [`script-contracts.md`](docs/script-contracts.md) | Deterministic helper contracts (signatures, I/O, invariants). |
+| [`configuration.md`](docs/configuration.md) | The config schema, derived half-life, and config-version re-normalization. |
+| [`invariants-and-failure-modes.md`](docs/invariants-and-failure-modes.md) | The validator invariant list and the failure-mode register with mitigations. |
+| [`appendix-glossary-acronyms.md`](docs/appendix-glossary-acronyms.md) | Glossary, acronym expansions, parameter reference, FAQ, references. |
+| [`binding-and-graph-sync.md`](docs/binding-and-graph-sync.md) | How an author in any repo binds to a separate knowledge-graph repo. |
+| [`staging-and-promotion.md`](docs/staging-and-promotion.md) | The **capture / promote** split: staging tier, atom schema, budgets, read overlay, atomic promote. |
+| [`user-journey.md`](docs/user-journey.md) | 🧭 End-to-end journey: install → bind → daily read/capture/promote, with auto-hook touchpoints. |
+| [`multi-graph-and-team-routing.md`](docs/multi-graph-and-team-routing.md) | 🔗 Working across many graphs, teams & orgs: which-graph vs which-team, per-graph staging, worked example. |
+| [`freshness-and-revalidation.md`](docs/freshness-and-revalidation.md) | ⏳ The **freshness** axis: `verified` clock, `stale_after`, read-time refresh cue, `volatility`, timeless-never-dies. |
 
 See also: [`FEATURES.md`](FEATURES.md) (feature showcase).
 

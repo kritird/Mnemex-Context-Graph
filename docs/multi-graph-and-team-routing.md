@@ -1,10 +1,10 @@
-# 🧭 13 — Multi-Graph, Bindings & Team Routing
+# 🧭 Multi-Graph, Bindings & Team Routing
 
 > Part of the **Mnemex Context Graph** standard. This document answers a question the other docs only
 > touch in pieces: **when an author works across several repos — each bound to a different graph, plus a
 > personal local graph, and a team within an org — how do `init`, `read`, `capture`, and `promote` know
-> *which graph* and *which team* to write to?** It ties [`10-binding-and-graph-sync.md`](10-binding-and-graph-sync.md)
-> (which graph) and [`11-staging-and-promotion.md`](11-staging-and-promotion.md) (capture/promote) together
+> *which graph* and *which team* to write to?** It ties [`binding-and-graph-sync.md`](binding-and-graph-sync.md)
+> (which graph) and [`staging-and-promotion.md`](staging-and-promotion.md) (capture/promote) together
 > into one end-to-end mental model.
 
 ---
@@ -87,7 +87,7 @@ flowchart TD
 The binding also carries two routing-relevant fields: **`default_team:`** (the fallback team) and
 **`author:`** (commit/stamp identity). Set exactly one of `graph_remote:` (git URL — cloned, synced,
 pushed) or `graph_path:` (local folder — used in place). See
-[`10-binding-and-graph-sync.md`](10-binding-and-graph-sync.md) for the full schema and graph kinds.
+[`binding-and-graph-sync.md`](binding-and-graph-sync.md) for the full schema and graph kinds.
 
 ---
 
@@ -226,12 +226,12 @@ flowchart TD
 Deliberately **not** created yet: any **node files** (a fresh graph holds zero knowledge — nodes appear only
 when your first `mnx-promote` drains staged atoms), and the **binding** itself (written as a separate step, so
 a graph can exist before anyone points at it). Full scaffold contract:
-[`10-binding-and-graph-sync.md`](10-binding-and-graph-sync.md) §Init flow.
+[`binding-and-graph-sync.md`](binding-and-graph-sync.md) §Init flow.
 
 ---
 
 ## ➡️ Where to go next
 
-- 🔗 The binding schema, resolution, sync, and graph kinds: [`10-binding-and-graph-sync.md`](10-binding-and-graph-sync.md)
-- 📥 The capture/promote split and staging tier in depth: [`11-staging-and-promotion.md`](11-staging-and-promotion.md)
-- 🧭 The whole arc, install → daily use: [`12-user-journey.md`](12-user-journey.md)
+- 🔗 The binding schema, resolution, sync, and graph kinds: [`binding-and-graph-sync.md`](binding-and-graph-sync.md)
+- 📥 The capture/promote split and staging tier in depth: [`staging-and-promotion.md`](staging-and-promotion.md)
+- 🧭 The whole arc, install → daily use: [`user-journey.md`](user-journey.md)

@@ -9,8 +9,8 @@ Retrieve from the Mnemex graph **without context bloat**. You route by reading s
 only what you commit to, and record what you actually used. You never mutate knowledge — your only write
 is appending usage stamps to a registry.
 
-Background: `docs/01-rationale-and-concepts.md`, `docs/02-architecture.md`,
-`docs/11-staging-and-promotion.md` (the staged overlay). Helpers you call:
+Background: `docs/rationale-and-concepts.md`, `docs/architecture.md`,
+`docs/staging-and-promotion.md` (the staged overlay). Helpers you call:
 `scripts/mnx_binding.py` (locate the graph), `scripts/mnx_compact.py` (overdue check, registry-tail
 fold), `scripts/mnx_resolve.py` (id→path), `scripts/mnx_decay.py` (true current score when labels are stale),
 `scripts/mnx_stage.py` (capture-staging overlay — local, un-promoted atoms),
@@ -19,6 +19,10 @@ fold), `scripts/mnx_resolve.py` (id→path), `scripts/mnx_decay.py` (true curren
 ## Preflight — locate the graph (always first)
 Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_binding.py" status`.
 - If `resolved` is false → **STOP**: tell the user *"No Mnemex graph configured. Run `/mnemex:mnx-init`."*
+- **Echo the resolved graph** so the user knows which graph the answer is drawn from: show the
+  `resolution` line, e.g. *"Reading from **payments-knowledge** (source: project .mnemex.md)."* If
+  `default_fallback` is true, flag it: *"⚠️ No project binding here — reading from your personal graph
+  **personal-notes**."* (LIMITATIONS.md #2 — make the resolved graph and its source visible.)
 - If `clone_present` is false (a remote graph not yet materialized this session) → run `mnx_binding.py sync` once.
 - Use the returned **`graph_root`** as the graph location for every read below. **Never operate on the
   current working directory** — the author's project repo is not the graph.
@@ -67,7 +71,7 @@ Overlay rules (decision #10):
 - Routing stays correct between consolidations via the registry tail-fold (step 3) — the overlay is
   additive, not a substitute for reading the graph tiers.
 
-### 3c. Freshness check — signal stale knowledge (Doc 14)
+### 3c. Freshness check — signal stale knowledge (Freshness & Revalidation)
 Freshness is a **separate axis from heat**: an atom can be `hot` yet `stale`. Each index row carries a
 precomputed **`stale_after`** column. For every atom you bring into the answer, if `stale_after` is a real
 timestamp (not `—`) and it is **in the past** (`now > stale_after`), the atom is **stale** — its content
@@ -77,7 +81,7 @@ has not been re-confirmed within its revalidation horizon.
   it."* Then actually re-check it against its source as part of the task.
 - A `—` in `stale_after` means the atom is **timeless** (or dead) — never cue it.
 - This is a **signal only**. Do not rewrite the node here. Acting on the outcome is step 6 (still-true) or
-  a follow-up `mnx-capture` (changed) / promote (obsolete). See the three outcomes in Doc 14 §6.
+  a follow-up `mnx-capture` (changed) / promote (obsolete). See the three outcomes in Freshness & Revalidation §6.
 
 ### 4. Expand only on commit
 Resolve candidate ids to paths with `mnx_resolve.resolve` (local index for intra-cluster, team

@@ -1,7 +1,7 @@
 """mnx_resolve.py — id↔path resolution and the reverse-edge map.
 
 The shared resolver used by read, write, and gc; they must all agree.
-See docs/06-script-contracts.md.
+See docs/script-contracts.md.
 
 The reverse map is built from node front-matter `edges` (hard, integrity-guaranteed)
 across ALL tiers and tombstones — a cold or dead node is still visible to integrity

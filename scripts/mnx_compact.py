@@ -1,6 +1,6 @@
 """mnx_compact.py — registry replay + checkpoint (the LSM merge).
 
-See docs/02-architecture.md §2 and docs/06-script-contracts.md.
+See docs/architecture.md §2 and docs/script-contracts.md.
 
 The registry is the write-ahead log; the index strengths are the SSTable; compaction
 (inside mnx-consolidate, promote's back half) is the merge. Compaction REPLAYS registry lines after the cluster's
@@ -19,7 +19,7 @@ import mnx_config
 import mnx_decay
 
 FLAG_ROLE = "flag"
-REVALIDATED_ROLE = "revalidated"   # freshness event (weight 0): advances `verified`, NEVER strength (Doc 14)
+REVALIDATED_ROLE = "revalidated"   # freshness event (weight 0): advances `verified`, NEVER strength (Freshness & Revalidation)
 MAINT_SENTINEL = "__maintenance-due__"
 
 
@@ -81,7 +81,7 @@ def fold(materialized_state: dict[str, Any], deltas: list[dict[str, Any]],
     same-id deltas applied in ts order. The `flag`/maintenance sentinel rows are ignored, and so
     are `revalidated` (freshness) events — they carry weight 0 and must never touch strength or
     last_update; they advance the node's `verified` instead (see latest_revalidations, applied to
-    node truth by the consolidate pass — Doc 14).
+    node truth by the consolidate pass — Freshness & Revalidation).
     """
     state = {k: dict(v) for k, v in materialized_state.items()}
     for d in sorted(deltas, key=lambda r: r["ts"]):
@@ -101,7 +101,7 @@ def fold(materialized_state: dict[str, Any], deltas: list[dict[str, Any]],
 
 
 def latest_revalidations(deltas: list[dict[str, Any]]) -> dict[str, str]:
-    """Latest `revalidated` timestamp per node id among the given deltas (Doc 14).
+    """Latest `revalidated` timestamp per node id among the given deltas (Freshness & Revalidation).
 
     The consolidate pass uses this to advance each node's `verified` (a node truth-write): set
     node.verified = max(node.verified, latest_revalidations[id]). Monotonic; strength untouched.

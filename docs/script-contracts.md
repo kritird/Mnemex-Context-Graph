@@ -1,4 +1,4 @@
-# 🧰 06 — Script Contracts
+# 🧰 Script Contracts
 
 > [!NOTE]
 > 🧠 **Skills reason; scripts decide.** Anything that must be exact — decay math, id→path resolution,
@@ -37,6 +37,9 @@ read_chunk(path, section) -> str  # ranged read of one labeled section (head|hot
 slugify(title) -> str             # candidate id; caller ensures uniqueness
 is_valid_id(s) -> bool            # slug rules: [a-z0-9-]+, stable, no spaces
 
+parse_wikilinks(body) -> [{name, display?}]   # inline [[name]] / [[name|Display]] (Link Reconciliation). Pipe = DISPLAY
+                                  #  (wiki-native), NOT a type. De-duped by normalized name, order kept.
+
 clamp_dt(t_from, t_to) -> float   # max(0, seconds) — used everywhere Δt appears
 ```
 
@@ -49,7 +52,7 @@ malformed front-matter rather than guessing.
 
 Connects an author in any project to the graph, which is either a **git remote** or a **local folder**.
 Self-contained (does not import the other helpers); stdlib + `PyYAML` only.
-Full spec: [`10-binding-and-graph-sync.md`](10-binding-and-graph-sync.md).
+Full spec: [`binding-and-graph-sync.md`](binding-and-graph-sync.md).
 
 ```
 resolve(start_dir=cwd) -> Binding | None
@@ -210,7 +213,7 @@ stamped; appending takes no lock (append-only).
 Owns the staging substrate between session and graph: `mnx-capture` stages atoms here; `mnx-promote`
 reconciles + merges them in and clears it. One folder per graph under
 `~/.claude/mnemex/staging/<graph-slug>/atoms/` (outside the clone; never pushed). Imports `mnx_binding`
-+ `mnx_common`. Full model: [`11-staging-and-promotion.md`](11-staging-and-promotion.md).
++ `mnx_common`. Full model: [`staging-and-promotion.md`](staging-and-promotion.md).
 
 ```
 provisional_id(atom) -> 'stg-<sha1[:12]>'   # content hash; idempotent capture; NEVER a real id
@@ -244,7 +247,8 @@ validates/repairs). Imports `mnx_binding`, `mnx_common`, `mnx_stamp`, and best-e
 
 ```
 status() -> {resolved, binding, clone_present, available, pending_stamps, stamp_durability,
-             staging:{count, budget_level, urgent, oldest_age_days, atoms:[{provisional_id, score, …}]},
+             staging:{count, budget_level, urgent, oldest_age_days, atoms:[{provisional_id, score, …}],
+                      held:{count, oldest_age_days?, lingering_nag?}},
              teams:[{team, clusters, nodes, hot, warm, cold, cluster_names, last_gc, gc_overdue_days}],
              totals:{teams, clusters, nodes, hot, warm, cold}, health:{ok, errors, warnings}}
     # resolved=false -> {message: run /mnemex:mnx-init}.  available=false -> bound but not materialized.
@@ -284,7 +288,7 @@ changed_since_last_compaction(team, cfg) -> bool
 renormalize(scope, old_lam, new_lam, now) -> plan
     # recompute stored strengths so score_new(now)==score_old(now) for every node (continuity)
 resolve_horizon(node, cfg) -> str|None    # stale_after = verified + horizon(volatility, type, cfg);
-    # None for volatility:timeless or a dead (retired) node (Doc 14 §3). Pure; no clock read beyond `verified`.
+    # None for volatility:timeless or a dead (retired) node (Freshness & Revalidation §3). Pure; no clock read beyond `verified`.
 ```
 
 **Invariants:** `derive`/`resolve_horizon` are deterministic; `renormalize` preserves every node's
@@ -299,7 +303,7 @@ scores are trusted.
 check(scope) -> Report          # list of {invariant, severity, node/edge, detail}
     # adds inv 14 (W): node body > node_body_max_chars (split into nodes + an edge; never truncate);
     # index node-set (inv 8) and denorm (inv 9, incl. stale_after 9c) span the chained index (head + index.NNN.md);
-    # freshness (Doc 14): inv 9b verified monotonic + created≤verified/updated; 9d timeless never a death mark.
+    # freshness (Freshness & Revalidation): inv 9b verified monotonic + created≤verified/updated; 9d timeless never a death mark.
 fix(scope) -> Report            # regenerate derived files (index, reverse map, cross-links) from nodes
 check_staging() -> Report       # OPTIONAL inv 17: local staging tier — provisional ids well-formed +
                                 # unique, each id matches its content hash (untampered), provenance
@@ -309,7 +313,7 @@ check_staging() -> Report       # OPTIONAL inv 17: local staging tier — provis
 CLI: `check [scope] | fix [scope] | check-staging`.
 
 The full invariant list it enforces is in
-[`08-invariants-and-failure-modes.md`](08-invariants-and-failure-modes.md). `fix` only ever rebuilds
+[`invariants-and-failure-modes.md`](invariants-and-failure-modes.md). `fix` only ever rebuilds
 **derived** artifacts — nodes are truth and are never auto-edited by the doctor.
 
 **Invariants:** `check` is read-only; `fix` is idempotent (running twice yields no further change);
@@ -327,10 +331,31 @@ entries(team) -> [row]                              # every active node in the t
 resolve(name, team) -> {resolved:id|None, cluster_path, tier, match, candidates[], red_link}
     # exact-first: id → alias → summary → ranked token-overlap candidates; no exact ⇒ red_link
 regenerate_org(graph_root) -> writes root index.md  # COARSE teams→domains; never lists nodes
+resolve_batch(names, team) -> {resolved:{name:id}, red:[name], candidates:{name:[…]}}   # Link Reconciliation L1
+red_links(team) -> [{source_id, source_path, name, type}]   # outstanding [[names]] with resolved_id null
+backfill(team, new_id, aliases) -> [{source_id, source_path, name, type}]   # red-links a new id resolves
 ```
-CLI: `regenerate <team> | regenerate-org <root> | entries <team> | resolve <name> <team>`.
-**Invariants:** team-scoped (resolution scope = edge scope); derived (never hand-merged); the referred-to
-node is never written — edges live on the source + cross-links.
+CLI: `regenerate <team> | regenerate-org <root> | entries <team> | resolve <name> <team> | red-links <team>
+| backfill <team> <new_id> [aliases;list]`.
+**Invariants:** team-scoped (resolution scope = link scope); derived (never hand-merged); the referred-to
+node is never written — links live on the source note (+ the generated cross-links mirror).
+
+### 🕸️ `mnx_mesh.py` — Step 2b link reconciliation (the wiki mesh; Link Reconciliation)
+
+```
+plan_links(notes, team) -> {links[], red_links[], backlinks[], counts}   # PURE / read-only proposer
+    # notes: [{id, body, aliases?, disposition?, mentions?}]. Resolves each note's inline [[wiki-links]]
+    # against the team phonebook (+ an in-batch catalog for sibling pages created this cycle); keeps a
+    # red-link for any [[name]] with no page yet; back-fills OLDER notes whose red-links a new/renamed
+    # page now satisfies (mnx_phonebook.backfill). Untyped by default; no self-links; deterministic.
+apply_links(plan, team) -> {nodes_edited, missing_sources, …}   # SWEEP: writes body links + mirrors
+    # mirrors each source note's resolved links into front-matter `edges:`, records red-links in
+    # `mentions:`. Idempotent (no duplicate edge on re-apply). Lock-gated in the promote flow.
+```
+CLI: `plan <team> <notes.json> | apply <team> <plan.json>`.
+**Invariants:** `plan_links` writes nothing; `apply_links` never duplicates an edge; the new page is never
+edited to fake an inbound link (back-links are written onto the OLDER source note); fuzzy similarity is
+never turned into a link here (that is `mnx_simindex` → HITL); front-matter `edges:` is a generated mirror.
 
 ### ♻️ `mnx_regen.py` — the `mnx-regen` git merge driver (the keystone)
 
@@ -376,7 +401,8 @@ CLI: `query --text … --scope … [--threshold] | pairs --scope … [--threshol
   counts + freshness) plus `warm.md` / `cold.md` (+ `cold.NNN.md`) / `dead.md`. `mnx_common.parse_index`
   merges sibling tier files transparently, so all consumers see the full tier set either way.
 - **`mnx_doctor`**: invariants **17** (derivability), **18** (phonebook completeness + path accuracy),
-  **19** (unresolved mentions / red links), **20** (org-directory completeness), and a
+  **19** (unresolved mentions / red links), **20** (org-directory completeness), **21** (mesh mirror: every
+  resolved `mentions[].resolved_id` appears in the node's `edges` — Link Reconciliation §8), and a
   merge-driver-registered check; `fix()` regenerates the phonebook + org directory and registers the
   merge driver.
 

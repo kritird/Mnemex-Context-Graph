@@ -1,4 +1,4 @@
-# ⚙️ 02 — Architecture: Memory Dynamics
+# ⚙️ Architecture: Memory Dynamics
 
 This document specifies the *mechanics* — how relevance is computed, how the registry/index/compaction
 interact, how tiering works without thrash, and why the whole thing costs almost nothing in read/write
@@ -135,7 +135,7 @@ true current score.
 `mnx-consolidate` performs **compaction + re-tiering + budget handling** as one pass, because they are the same
 ranking viewed three ways (§ Overview). The pass is strictly **two-phase, snapshot-then-apply** —
 this single principle resolves the majority of the failure modes in
-[`08-invariants-and-failure-modes.md`](08-invariants-and-failure-modes.md):
+[`invariants-and-failure-modes.md`](invariants-and-failure-modes.md):
 
 ```mermaid
 flowchart LR
@@ -162,7 +162,7 @@ flowchart LR
   deltas, advance the registry high-water marks, stamp `last_compaction` + `config_version`, then run
   the validator, then **one git commit**.
 
-Full algorithm with ordering guarantees: [`05-maintenance-pass-algorithm.md`](05-maintenance-pass-algorithm.md).
+Full algorithm with ordering guarantees: [`maintenance-pass-algorithm.md`](maintenance-pass-algorithm.md).
 
 ---
 
@@ -197,7 +197,7 @@ H_pattern = H_domain · (1 + pattern_halflife_bonus)     # bonus default e.g. 0.
 ```
 
 The user sets one number and is *informed at config time* that patterns get the bonus; they never have
-to reason about two decay rates. See [`07-configuration.md`](07-configuration.md).
+to reason about two decay rates. See [`configuration.md`](configuration.md).
 
 ---
 

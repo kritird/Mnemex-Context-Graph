@@ -1,4 +1,4 @@
-# ⏳ 14 — Freshness and Revalidation
+# ⏳ Freshness and Revalidation
 
 Heat tells you whether to **surface** an atom. It says nothing about whether the atom is still **true**.
 This document adds a second, orthogonal axis — **freshness** — and the **Revalidation-on-Read** mechanism
@@ -12,7 +12,7 @@ that signals the model to re-confirm a fact that was last verified too long ago.
 
 ## 1️⃣ Why heat is not freshness
 
-A node's heat is driven by **access** — every stamped read reinforces it (Doc 02). But reading an atom
+A node's heat is driven by **access** — every stamped read reinforces it (Architecture). But reading an atom
 never makes it *true*; it only makes it *loud*. The failure this creates is specific and dangerous: a
 frequently-read fact that was correct a year ago is now a **confidently-recalled, high-exposure, unverified**
 claim. Heat actively **hides** staleness — the more an atom is used, the more the system vouches for it,
@@ -43,7 +43,7 @@ flowchart LR
 
 ## 2️⃣ Three truth clocks on a node
 
-A node already carries two timestamps (Doc 03 §2). Freshness adds a third. They answer different questions
+A node already carries two timestamps (Data Model & Schemas §2). Freshness adds a third. They answer different questions
 and must not be conflated.
 
 | Field | Set when | Answers |
@@ -76,9 +76,9 @@ resolve_horizon(node) → stale_after :
 ```
 
 `stale_after` is recomputed by consolidation whenever `verified`, `volatility`, or the config horizon
-changes (Doc 05). Because it is precomputed, an edited `freshness_ttl_days` only takes effect at the next
-consolidation — identical to how tier labels "may be stale since last gc" (Doc 04 §1) and guarded by the
-same `config_version` re-normalization (Doc 07).
+changes (Maintenance Pass Algorithm). Because it is precomputed, an edited `freshness_ttl_days` only takes effect at the next
+consolidation — identical to how tier labels "may be stale since last gc" (Skills, Commands & Hooks §1) and guarded by the
+same `config_version` re-normalization (Configuration).
 
 ---
 
@@ -103,19 +103,19 @@ flowchart TD
 
 - **A — global default** (`freshness_ttl_days`, default **30**): asked at `mnx-init`, like `half_life_days`.
 - **B — per-type derivation:** patterns (durable *how*) get the longer `freshness_pattern_bonus` horizon,
-  domain facts get the base — derived from one number, the same rule shape as the half-life bonus (Doc 07).
+  domain facts get the base — derived from one number, the same rule shape as the half-life bonus (Configuration).
 - **C — per-node override** (`volatility`): the escape hatch for outliers. `timeless` (definitions,
   invariants), `volatile` (URLs, versions, prices, on-call names), or an explicit day count.
 
 **Who sets C:** `mnx-capture` **proposes** `volatility` from the atom's content shape; the human **overrides**
-at the `mnx-promote` plan gate (Doc 04). The author never has to remember to annotate — they wave through or
+at the `mnx-promote` plan gate (Skills, Commands & Hooks). The author never has to remember to annotate — they wave through or
 correct a suggestion.
 
 ---
 
 ## 5️⃣ Revalidation-on-Read (the signal)
 
-`mnx-read` stays **pure w.r.t. knowledge** — its only write remains a registry append (Doc 04 §1). Freshness
+`mnx-read` stays **pure w.r.t. knowledge** — its only write remains a registry append (Skills, Commands & Hooks §1). Freshness
 adds a read-time *signal*, not a mutation:
 
 1. For every atom in play, if `stale_after` is non-null and `now > stale_after`, mark it **`stale`** and
@@ -123,7 +123,7 @@ adds a read-time *signal*, not a mutation:
    before relying on this."* (When the atom's body is loaded, the cue enriches the message with the exact
    `verified` date; otherwise it states the overdue horizon.)
 2. **Anti-nag.** Each atom's cue fires **at most once per session** (the same per-session-marker mechanism the
-   Stop hook uses, Doc 04). Across sessions it re-fires until `verified` advances.
+   Stop hook uses, Skills, Commands & Hooks). Across sessions it re-fires until `verified` advances.
 3. The model, in the course of the task, decides one of the three outcomes below. If it **cannot** verify
    in-session (no source access), it emits nothing — the atom stays stale and the cue returns next session.
 
@@ -148,7 +148,7 @@ solely to advance `verified`. This is why "still true" costs one log line and ne
 `volatility: timeless` is not only "never stale" — it also **pins the atom against automatic death**. A
 foundational definition that nobody has read in months has decayed in *heat* (it may sit in cold — that is
 just read cost) but it must never be **tombstoned** by the cold-TTL gate. So consolidation exempts timeless
-nodes from the death conjunction gate, alongside the existing sole-referrer reluctance (Doc 05 §Phase A.4).
+nodes from the death conjunction gate, alongside the existing sole-referrer reluctance (Maintenance Pass Algorithm §Phase A.4).
 
 > [!IMPORTANT]
 > Timeless blocks only *automatic* (TTL-driven) death. An eternal truth that genuinely gets **replaced** is
@@ -162,7 +162,7 @@ nodes from the death conjunction gate, alongside the existing sole-referrer relu
 
 ---
 
-## 8️⃣ Consolidation's role (Doc 05)
+## 8️⃣ Consolidation's role (Maintenance Pass Algorithm)
 
 Folded into the existing back-half-of-promote pass, against the frozen snapshot:
 
@@ -176,7 +176,7 @@ Folded into the existing back-half-of-promote pass, against the frozen snapshot:
 
 ---
 
-## 9️⃣ Invariants (Doc 08)
+## 9️⃣ Invariants (Invariants & Failure Modes)
 
 - **Denormalization fresh (extended):** `index.stale_after == resolve_horizon(node)` for every node — the
   same class of invariant that keeps `summary`/`aliases` in sync.
@@ -215,7 +215,7 @@ Folded into the existing back-half-of-promote pass, against the frozen snapshot:
 
 ---
 
-*See also: [`03-data-model-and-schemas.md`](03-data-model-and-schemas.md) (fields + index column),
-[`07-configuration.md`](07-configuration.md) (the horizon knob), [`04-skills-commands-hooks.md`](04-skills-commands-hooks.md)
-(read cue, capture proposal, init prompt), [`05-maintenance-pass-algorithm.md`](05-maintenance-pass-algorithm.md)
-(consolidation), [`08-invariants-and-failure-modes.md`](08-invariants-and-failure-modes.md) (invariants).*
+*See also: [`data-model-and-schemas.md`](data-model-and-schemas.md) (fields + index column),
+[`configuration.md`](configuration.md) (the horizon knob), [`skills-commands-hooks.md`](skills-commands-hooks.md)
+(read cue, capture proposal, init prompt), [`maintenance-pass-algorithm.md`](maintenance-pass-algorithm.md)
+(consolidation), [`invariants-and-failure-modes.md`](invariants-and-failure-modes.md) (invariants).*

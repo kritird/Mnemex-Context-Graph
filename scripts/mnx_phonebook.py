@@ -1,6 +1,6 @@
 """mnx_phonebook.py — the team link-resolution catalog + org directory (DERIVED).
 
-See docs/13-resilient-mesh-roadmap.md §3 (W2).
+See docs/link-reconciliation.md §3 (W2).
 
 The phonebook is how a *blind* author forms a link. An author/atom mentions a target by
 NAME/alias (like a wiki `[[…]]`), never by file path. Reconcile resolves that name against
@@ -160,6 +160,71 @@ def _read_phonebook(team: str) -> list[dict[str, Any]]:
     return mnx_common.parse_md_table(secless)
 
 
+def resolve_batch(names: list[str], team: str) -> dict[str, Any]:
+    """Resolve many names at once against the team phonebook (Link Reconciliation Phase L1).
+
+    Returns {resolved:{name:id}, red:[name], candidates:{name:[…]}}. Cross-team routing is left to
+    the caller (org directory); this is the team-scoped exact resolver.
+    """
+    resolved: dict[str, str] = {}
+    red: list[str] = []
+    cand: dict[str, Any] = {}
+    for n in names:
+        r = resolve(n, team)
+        if r.get("resolved"):
+            resolved[n] = r["resolved"]
+        else:
+            red.append(n)
+            if r.get("candidates"):
+                cand[n] = r["candidates"]
+    return {"resolved": resolved, "red": red, "candidates": cand}
+
+
+def _iter_active_nodes(team: str):
+    """Yield (node, cluster_rel) for every active node in the team."""
+    root = _team_root(team)
+    for cluster in mnx_common.iter_clusters(root):
+        rel = str(Path(cluster).resolve().relative_to(root))
+        for nf in mnx_common.iter_node_files(cluster):
+            try:
+                node = mnx_common.parse_node(nf)
+            except Exception:
+                continue
+            if node.get("status") == DEAD:
+                continue
+            yield node, rel
+
+
+def red_links(team: str) -> list[dict[str, Any]]:
+    """Every outstanding red-link in the team (Link Reconciliation §3): a node `mentions[]` entry whose
+    `resolved_id` is null — an authored [[name]] that has no page yet. Returns
+    [{source_id, source_path, name, type}]. Never errors on a node without mentions.
+    """
+    out: list[dict[str, Any]] = []
+    for node, _rel in _iter_active_nodes(team):
+        for m in node.get("mentions") or []:
+            if isinstance(m, dict) and not m.get("resolved_id") and m.get("name"):
+                out.append({"source_id": node.get("id"), "source_path": node.get("_path"),
+                            "name": m["name"], "type": m.get("type")})
+    return out
+
+
+def backfill(team: str, new_id: str, aliases: Any = None) -> list[dict[str, Any]]:
+    """Red-links that a newly-introduced page id (+ its aliases) now resolves (Link Reconciliation §3 / Phase L2).
+
+    Matches a red-link's normalized name against the new id or any alias. Returns the source notes
+    whose red-link should turn live: [{source_id, source_path, name, type}]. Deterministic; the
+    caller writes the back-link onto each source note under the lock.
+    """
+    keys = {_norm(new_id)}
+    if isinstance(aliases, str):
+        aliases = mnx_common.aliases_from_index(aliases)
+    for a in (aliases or []):
+        keys.add(_norm(str(a)))
+    keys.discard("")
+    return [rl for rl in red_links(team) if _norm(rl["name"]) in keys]
+
+
 def regenerate_org(graph_root: str) -> dict[str, Any]:
     """Regenerate the org directory (root index.md): teams → domains + summary. COARSE — never
     lists nodes. Used only to route a CROSS-team mention to a candidate team for a soft reference.
@@ -202,6 +267,14 @@ def _main(argv: list[str]) -> int:
             # resolve <name> <team>
             res = resolve(argv[2], argv[3])
             return mnx_common.emit(res, ok=res.get("resolved") is not None or bool(res.get("candidates")))
+        if cmd == "red-links":
+            # red-links <team>
+            return mnx_common.emit({"team": argv[2], "red_links": red_links(argv[2])})
+        if cmd == "backfill":
+            # backfill <team> <new_id> [aliases;semicolon;list]
+            aliases = argv[4] if len(argv) > 4 else None
+            return mnx_common.emit({"team": argv[2], "new_id": argv[3],
+                                    "backfill": backfill(argv[2], argv[3], aliases)})
         return mnx_common.emit({"error": f"unknown subcommand: {cmd}"}, ok=False)
     except Exception as exc:
         return mnx_common.emit({"error": str(exc)}, ok=False)

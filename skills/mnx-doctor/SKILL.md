@@ -9,7 +9,7 @@ The safety net that makes an LLM-authored graph trustworthy. Nodes are truth; ev
 derived and must agree with them. You check the invariants and, with `--fix`, regenerate the derived
 files from the nodes. You never edit node knowledge.
 
-Full invariant list with severities: `docs/08-invariants-and-failure-modes.md` (Part A). Helpers:
+Full invariant list with severities: `docs/invariants-and-failure-modes.md` (Part A). Helpers:
 `mnx_binding` (locate + persist), `mnx_doctor.check`, `mnx_doctor.fix`, `mnx_resolve`, `mnx_index`,
 `mnx_config`.
 
@@ -21,20 +21,13 @@ mnx-promote, it has already resolved it.) Add `--staging` to also run the staged
 (`mnx_doctor.py check-staging`) over the local capture tier.
 
 ## Check (read-only)
-Run the full suite and report findings grouped by severity:
-- **Referential:** every edge target exists; no edge points at a tombstoned node (unless repointed);
-  reverse map covers all tiers + tombstones; cross-links complete with accurate paths; soft cross-team
-  references flagged if dangling (info only — they carry the no-integrity disclaimer).
-- **Schema:** front-matter valid; ids are valid stable slugs; `pattern` nodes have a non-null
-  `trigger`; timestamps UTC ISO-8601.
-- **Derived freshness:** index node-set equals the folder node-set; `index.summary == node.summary`
-  and `index.aliases == node.aliases` for every node; materialized strength/last_update present.
-- **Tier/budget:** each cluster's hot section ≤ `hot_k`; no cluster over `node_budget`; orphans
-  (zero inbound) flagged.
-- **Telemetry/state:** high-water marks monotonic; config matches `.mnemex` (or re-normalization
-  pending); no stranded `pass.plan.json` without a lock.
-
-Report each finding as `{invariant, severity (E/W/I), node-or-edge, detail}`.
+Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_doctor.py" check <graph_root>`. The **script** is the
+source of truth for which checks run and their severities — you do not enumerate or re-derive the
+invariants by hand; you run it and report what it returns. It covers the full suite — referential
+integrity, schema, derived-state freshness, freshness horizons, tier/budget, telemetry/state, and
+mesh/derivability — and returns one finding per problem as
+`{invariant, severity (E/W/I), node-or-edge, detail}`. Report the findings grouped by severity.
+(Fuller per-invariant reference, optional: Part A of `docs/invariants-and-failure-modes.md`.)
 
 ## Fix (`--fix`, derived files only)
 Regenerate, from the nodes: every `index.md` (rebuild HOT/WARM/COLD, re-denormalize summary/aliases),

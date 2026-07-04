@@ -28,8 +28,10 @@ yet. Report what it is bound to (`binding.graph_remote` / `graph_path` + `kind`)
 ### Configured and available
 Summarize concisely (don't dump raw JSON):
 
-- **Binding** — `graph_remote` or `graph_path`, the `kind`, and where it came from (`source`:
-  project `.mnemex.md` / env / user default).
+- **Binding** — lead with the `resolution` line (human `display_name` + source, e.g. *"payments-knowledge
+  (source: project .mnemex.md)"*), then `graph_remote`/`graph_path` and `kind`. If `default_fallback` is
+  true, flag it: no project `.mnemex.md` matched, so operations here fall through to the user's personal
+  graph.
 - **Contents** — `totals` (teams / clusters / nodes) and the hot/warm/cold tier spread; optionally list
   team names and their `cluster_names` so the user can see what domains exist.
 - **Pending usage stamps** — `pending_stamps` (reads recorded but not yet pushed). For `plain-local` /
@@ -39,6 +41,10 @@ Summarize concisely (don't dump raw JSON):
   `count > 0`, list the atoms (newest first) so the user can *see* what is pending promotion — and tell
   them they can drop one with `/mnemex:mnx-capture --drop <provisional_id>` or clear all with
   `/mnemex:mnx-capture --discard-all` (this skill only reports; discard is a capture action).
+- **Held contradictions** — `staging.held`: `count` (and `oldest_age_days` / `lingering_nag` when
+  present) — atoms a prior promote could not reconcile against the graph, parked in the local held queue
+  (W9). When `count > 0`, note them so the user knows a past contradiction is still awaiting resolution
+  at the next `/mnemex:mnx-promote`; `lingering_nag` means one has aged past `held_max_age_days`.
 - **Maintenance** — each team's `last_gc` and any `gc_overdue_days`.
 - **Health** — `health.errors` / `health.warnings` from the doctor's invariant suite.
 

@@ -1,6 +1,6 @@
 """mnx_config.py — config load, derivation, version stamping, re-normalization.
 
-See docs/07-configuration.md and docs/06-script-contracts.md.
+See docs/configuration.md and docs/script-contracts.md.
 
 The user sets ONE knob (half_life_days); everything else is defaulted or derived.
 config_version + λ in force are stamped at each gc so a later parameter change is
@@ -74,7 +74,7 @@ def derive(cfg: dict[str, Any]) -> dict[str, Any]:
 def horizon_days(node: dict[str, Any], cfg: dict[str, Any]) -> float | None:
     """Resolve a node's freshness horizon in DAYS. None ⇒ never stale (timeless).
 
-    Precedence (Doc 14 §4): per-node `volatility` override → type-derived default.
+    Precedence (Freshness & Revalidation §4): per-node `volatility` override → type-derived default.
     """
     vol = node.get("volatility", "default")
     if isinstance(vol, str):

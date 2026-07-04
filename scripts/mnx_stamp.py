@@ -1,6 +1,6 @@
 """mnx_stamp.py — usage-stamp recording with a reset-durable spill.
 
-Background: docs/02-architecture.md §2 (the registry is the WAL), USER-JOURNEY-FINDINGS #2.
+Background: docs/architecture.md §2 (the registry is the WAL), USER-JOURNEY-FINDINGS #2.
 
 A usage stamp is one append-only registry line `{id} {ts} {role} {weight}`. For a
 git-remote graph the local clone is hard-reset to origin/HEAD every session start

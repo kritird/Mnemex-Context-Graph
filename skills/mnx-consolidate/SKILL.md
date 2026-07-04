@@ -12,7 +12,8 @@ description: INTERNAL maintenance pass over a Mnemex graph — compact usage sta
 
 One pass does three coupled jobs — compaction, re-tiering, budget-handling — plus death and edge
 hygiene. The governing principle is **snapshot-then-apply**: decide everything against a frozen view,
-then apply together. Read `docs/05-maintenance-pass-algorithm.md` in full before running; this is a summary.
+then apply together. The steps below are self-contained for execution; fuller rationale (optional):
+`docs/maintenance-pass-algorithm.md`.
 
 Helpers: `mnx_binding` (locate), `mnx_lock`, `mnx_config`, `mnx_compact`, `mnx_decay`, `mnx_resolve`,
 `mnx_index`, `mnx_doctor`, `mnx_common`.
@@ -38,7 +39,7 @@ Mutate nothing. Build the decision set against a frozen snapshot.
    `references` contribute nothing.
 3. **Retention + target tier:** `retention[X] = combine(score, struct)`; `target_tier[X]` with hot =
    top-K (`hot_k`) by score (`mnx_decay.tier_of`).
-3b. **Freshness (independent of heat; Doc 14):** per cluster, gather the revalidation events in the
+3b. **Freshness (independent of heat; Freshness & Revalidation):** per cluster, gather the revalidation events in the
    registry tail — `mnx_compact.latest_revalidations(deltas)` → `{id: latest_ts}`. These are weight-0
    `revalidated` stamps; they never entered `score[X]` (the fold ignores them). Plan to advance each
    node's `verified` to that ts in Phase B.
@@ -46,7 +47,7 @@ Mutate nothing. Build the decision set against a frozen snapshot.
    weak **and** TTL expired. **Sole-referrer reluctance:** if it is the only inbound of any still-active
    node, keep it warm (no orphan cascade). **Timeless exemption:** a node with `volatility: timeless` is
    **never** a death candidate — it decayed in heat but is permanently true, so it may sit in cold yet
-   must never be auto-tombstoned (it can leave only by an explicit human SUPERSEDE). Doc 14 §7.
+   must never be auto-tombstoned (it can leave only by an explicit human SUPERSEDE). Freshness & Revalidation §7.
 5. **Budget:** if a cluster exceeds `node_budget`, plan to sweep cold out of the active index; split the
    index along the `domain:` sub-key (`mnx_index.shard_index`); if a single sub-key still overflows,
    **chain the index** into `index.NNN.md` continuation chunks (B-tree-leaf style; `regenerate_index`

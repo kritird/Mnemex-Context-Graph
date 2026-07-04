@@ -38,7 +38,7 @@ Subcommands (argv[1]):
 Contract: with the single exception of the pre-commit-gate DENY, hooks are ADVISORY. They never
 raise and never block on internal errors — a failing hook must not disrupt the user's session
 (the gate fails open). Hooks read event JSON on stdin per the Claude Code hooks protocol.
-See docs/04-skills-commands-hooks.md §6.
+See docs/skills-commands-hooks.md §6.
 
 Dependencies: Python 3.9+ stdlib + PyYAML only.
 """

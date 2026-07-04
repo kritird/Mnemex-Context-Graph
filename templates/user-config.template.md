@@ -12,4 +12,4 @@ author:              # optional — identity for usage stamps / commits
 # Mnemex user default
 
 Your fallback knowledge graph. A project's own `.mnemex.md` (and the `MNEMEX_GRAPH_REMOTE` env var)
-take precedence over this file. See `docs/10-binding-and-graph-sync.md`.
+take precedence over this file. See `docs/binding-and-graph-sync.md`.

@@ -48,7 +48,7 @@ facts (the "what") by `pattern_halflife_bonus` (default +30%); you do not tune t
 
 Bump `config_version`. The next consolidation (the back half of `mnx-promote`) will **re-normalize**
 stored relevance so nothing jumps tiers abruptly, and `mnx-read` will warn you if a change is pending.
-See `docs/07-configuration.md`.
+See `docs/configuration.md`.
 
 ## Quick guidance
 
@@ -60,4 +60,4 @@ See `docs/07-configuration.md`.
 - `freshness_ttl_days` is a **separate** clock from decay: it is about whether a fact is still *true*, not
   whether it is still *used*. A fact that is 40 days past verification is flagged `stale` on read so the agent
   re-checks it — even if it is hot. Tag `volatility: timeless` on eternal facts (also stops them ever dying)
-  and `volatility: volatile` on fast-rotting ones. See `docs/14-freshness-and-revalidation.md`.
+  and `volatility: volatile` on fast-rotting ones. See `docs/freshness-and-revalidation.md`.

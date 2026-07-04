@@ -1,4 +1,4 @@
-# 🔗 10 — Binding and Graph Sync
+# 🔗 Binding and Graph Sync
 
 > Part of the **Mnemex Context Graph** standard. This document specifies how an author working in **any**
 > repository is connected to a **separate** knowledge-graph repository: where the binding configuration
@@ -33,7 +33,7 @@ flowchart LR
 
 The behavior config is a property of the **graph**, not the author or the project. It must not be
 duplicated into the binding, or two authors binding to one graph could decay it differently. If it is
-absent on first use, `mnx-init` creates it (see *Init flow*). See [`07-configuration.md`](07-configuration.md).
+absent on first use, `mnx-init` creates it (see *Init flow*). See [`configuration.md`](configuration.md).
 
 ## ⚙️ Binding configuration
 
@@ -112,8 +112,8 @@ clone — so it does not require a sync.) This is what makes the skills safe to 
 > domain tasks and `mnx-capture` to stage knowledge, and emits staged-pending / consolidation-overdue
 > nags; the `SessionEnd` hook prompts for `mnx-capture` (advisory, never auto-writes). `mnx-init` calls
 > `resolve`/`sync`; `mnx-promote`/`mnx-doctor` call `persist`. See
-> [`04-skills-commands-hooks.md`](04-skills-commands-hooks.md) §6 and
-> [`06-script-contracts.md`](06-script-contracts.md).
+> [`skills-commands-hooks.md`](skills-commands-hooks.md) §6 and
+> [`script-contracts.md`](script-contracts.md).
 
 ## 🧬 Graph kinds and persistence
 
@@ -145,7 +145,7 @@ recoverable:
 The staging side-store lives outside the clone **on purpose**: the clone is hard-reset to remote HEAD
 every session start, which would otherwise destroy un-promoted captures and un-flushed stamps. It is
 per-author and local — never part of the shared graph, never pushed. See
-[`11-staging-and-promotion.md`](11-staging-and-promotion.md).
+[`staging-and-promotion.md`](staging-and-promotion.md).
 
 ### ▶️ Session start (blocking)
 

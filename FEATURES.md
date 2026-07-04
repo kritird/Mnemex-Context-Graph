@@ -166,7 +166,7 @@ flowchart LR
 - 🗿 **`timeless` never dies** — an eternal definition is exempt from staleness **and** from auto-tombstoning; it
   can leave only by an explicit human supersede.
 
-> 📖 The full model: [`docs/14-freshness-and-revalidation.md`](docs/14-freshness-and-revalidation.md)
+> 📖 The full model: [`docs/freshness-and-revalidation.md`](docs/freshness-and-revalidation.md)
 
 ---
 
@@ -250,7 +250,7 @@ flowchart TD
 - ☁️📂🧾 **Three graph kinds** — git-remote (clone + push), git-local (commit), plain-folder (audit log).
 - 🛟 **No-auth fallback** — a failed remote pre-flight offers a local-folder graph instead.
 
-> 📖 The full multi-graph model: [`docs/13-multi-graph-and-team-routing.md`](docs/13-multi-graph-and-team-routing.md)
+> 📖 The full multi-graph model: [`docs/multi-graph-and-team-routing.md`](docs/multi-graph-and-team-routing.md)
 
 ---
 
@@ -285,7 +285,7 @@ pip install pyyaml
 /mnemex:mnx-init
 ```
 
-**📚 Go deeper:** [Overview](docs/00-overview.md) · [Rationale](docs/01-rationale-and-concepts.md) · [User Journey](docs/12-user-journey.md) · [Multi-Graph](docs/13-multi-graph-and-team-routing.md)
+**📚 Go deeper:** [Overview](docs/overview.md) · [Rationale](docs/rationale-and-concepts.md) · [User Journey](docs/user-journey.md) · [Multi-Graph](docs/multi-graph-and-team-routing.md)
 
 *Knowledge is files. Navigation is the filesystem. Relevance is a number you compute on demand.* 🧠
 

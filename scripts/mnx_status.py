@@ -125,6 +125,7 @@ def _staging_summary(binding) -> dict[str, Any]:
         "urgent": st.get("urgent", 0),
         "oldest_age_days": st.get("oldest_age_days"),
         "atoms": listing.get("atoms", []),
+        "held": st.get("held", {"count": 0}),
     }
 
 

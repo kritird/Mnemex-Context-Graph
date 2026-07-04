@@ -1,4 +1,4 @@
-# 🧭 00 — Overview
+# 🧭 Overview
 
 > Part of the **Mnemex Context Graph** standard. Read the documents in `docs/` in order; this one states
 > the thesis and the design goals in brief, and the rest expand each piece.
@@ -81,5 +81,5 @@ Wherever this subsystem reads state it is also mutating, consistency breaks subt
 forecloses that entire class with one principle: **snapshot-then-apply** — compute every decision
 against a frozen view, then apply.
 
-See [`02-architecture.md`](02-architecture.md) for the subsystem, and
-[`05-maintenance-pass-algorithm.md`](05-maintenance-pass-algorithm.md) for the principle in code-shape.
+See [`architecture.md`](architecture.md) for the subsystem, and
+[`maintenance-pass-algorithm.md`](maintenance-pass-algorithm.md) for the principle in code-shape.

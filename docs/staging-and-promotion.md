@@ -1,4 +1,4 @@
-# 📥 11 — Staging and Promotion (capture / promote)
+# 📥 Staging and Promotion (capture / promote)
 
 > Part of the **Mnemex Context Graph** standard. This document specifies the **capture / promote split**:
 > how durable knowledge produced in a session is first *staged* locally (cheap, frequent), and later
@@ -79,7 +79,8 @@ provenance:
 staged_at: 2026-06-29T10:11:21Z
 ---
 
-The atom's knowledge body (kept under the node-size budget; split + edge if larger).
+The atom's knowledge body. May carry inline [[wiki-links]] (Link Reconciliation) — capture hoists them to `mentions:`
+and preserves them; promote resolves them and splits an over-budget body into sibling pages + a link.
 ```
 
 **Provisional ids** are a content hash (`stg-` + first 12 hex of the SHA-1 of `type|summary|body|
@@ -133,13 +134,15 @@ staged atoms*). Capture's refusal message and the session nags surface both opti
 ## 🧹 Reviewing and discarding staged atoms
 
 Staging is **inspectable and prunable** before promote — the `git status` / `git restore --staged` of
-memory. The substrate ops live in `mnx_stage.py` (`list`, `clear-one --id`, `clear`); the user surfaces:
+memory. The substrate ops live in `mnx_stage.py` (`list`, `clear-one --id`, `clear`, `clear-merged`, and
+the held-queue ops `hold` / `held-list` / `release-held` / `drop-held`); the user surfaces:
 
 | Want | Surface | Underneath |
 |---|---|---|
-| **See** what is staged | `/mnemex:mnx-status` (read-only) | `mnx_stage.list_atoms` |
+| **See** what is staged (+ held) | `/mnemex:mnx-status` (read-only) | `mnx_stage.list_atoms` / `held_status` |
 | **Drop one** atom | `/mnemex:mnx-capture --drop <provisional-id>` | `mnx_stage.clear_one` |
 | **Discard all** staging | `/mnemex:mnx-capture --discard-all` (confirms first) | `mnx_stage.clear` |
+| **Resolve a held** contradiction | at the next `/mnemex:mnx-promote` (release) or discard it | `mnx_stage.release_held` / `drop_held` |
 
 Discard lives on **capture** (the only writer of staging), not on status (which stays strictly
 read-only). It touches **only** the local staging tier — never the graph, never the stamp spill. This is
@@ -157,27 +160,37 @@ what makes a bad capture recoverable without a full promote, and what relieves h
 - Routing stays correct between consolidations via the existing registry tail-fold (`mnx_decay`); the
   overlay is additive, not a substitute for reading the graph tiers.
 
-## ⚛️ Promote: atomic + total
+## ⚛️ Promote: per-atom terminal disposition + the held queue
 
 > [!IMPORTANT]
-> 🎯 **Atomic + total.** Every staged atom reaches a terminal disposition in one cycle, **any
-> contradiction is a hard HITL block** (resolve all in-cycle or abort), and on success staging is fully
-> cleared / on abort it is untouched. There is no lingering "held" state.
+> 🎯 **Per-atom, not all-or-nothing.** Each *clean* atom reaches a terminal disposition in the cycle and
+> is cleared on confirmed persist; a *contradicting* atom is moved to a local **held queue** for HITL
+> rather than aborting the whole batch (one contentious atom must not starve a growing batch — a liveness
+> bug). Held state lives **entirely in the local staging tier** — never any in-flight state on the graph.
 
-Every staged atom reaches a **terminal disposition** in one cycle — *created / merged / dropped-as-dup /
-superseded* (or *resurrected* from cold). **Any contradiction is a hard HITL block**: resolve all
-in-cycle or **abort**. On success staging is **fully cleared**; on abort staging is **untouched**. There
-is no lingering "held" state.
+Every non-contradicting staged atom reaches a **terminal disposition** in one cycle — *created / merged /
+dropped-as-dup / superseded* (or *resurrected* from cold) — and those atoms are cleared per-atom on a
+confirmed persist (`mnx_stage.clear_merged`). A staged atom whose reconcile flags a **contradiction** is
+**held**, not force-resolved: `mnx_stage.hold` moves it to the local held queue with a reason + the graph
+id it contradicts, keeping its self-sufficient provenance so it can be re-promoted **cold** once the human
+resolves the contradiction (`release_held` → re-reconciled next promote, or `drop_held` if the graph
+wins). Held atoms are bounded by `held_max_age_days` (default 14); a held atom lingering past that nags at
+session start/end. The human may still **abort** the whole promote (staging untouched); the held queue is
+the softer default so clean atoms are not starved by an unresolved one. There is no in-flight state on the
+graph side — a held atom is purely local until a future promote resolves it.
 
 ### 🔢 Order
 
 ```
 flush usage stamps
   → reconcile + merge staged atoms (clean-context sub-agent; HITL on contradictions)
+  → LINK RECONCILIATION (Step 2b, Link Reconciliation): split over-budget notes, resolve [[wiki-links]] → live links,
+        keep red-links, back-fill older notes the new pages heal (mnx_mesh + mnx_phonebook)
   → consolidate over the POST-MERGE graph (re-tier, death, edge hygiene, budget — in the SAME plan)
-  → ONE approval plan (human gate)
+  → ONE approval plan (human gate)  — merge + LINKS + consolidate together
+        (contradictions surface as HELD proposals: hold that atom, promote the rest)
   → apply serially under the lock  → doctor (must pass)  → persist (commit + push by kind)
-  → clear staging (only on confirmed persist)
+  → clear the promoted atoms (clear_merged) + hold the contradicting ones — only on confirmed persist
 ```
 
 Consolidation runs over the post-merge graph and is shown in the **same** approval plan, so its one HITL
@@ -192,7 +205,7 @@ full promote here would re-apply the still-full staging *on top of* that commit 
 this state has a dedicated recovery: `mnx-promote --retry-push` pushes the **existing** commit (no
 re-merge) and, only on a confirmed push, runs the deferred `clear`. The state is detected deterministically
 by `mnx_binding.unpushed_state` (`ahead > 0`); a fresh promote is refused while `unpushed` is true, and
-session start / end nag about it. See [`10-binding-and-graph-sync.md`](10-binding-and-graph-sync.md).
+session start / end nag about it. See [`binding-and-graph-sync.md`](binding-and-graph-sync.md).
 
 ### 🤝 The reconcile sub-agent contract
 
@@ -209,9 +222,10 @@ atoms carry self-sufficient provenance):
 ## 📏 Node-size budget (completeness-of-atom)
 
 A soft per-node body cap (`node_body_max_chars`, default ~6000) keeps atoms complete but not sprawling.
-Over budget → **split into multiple nodes + an edge** (good hygiene) — **never truncate**. Enforced
-softly by capture (split at extraction) and checked by the doctor (invariant 14, severity W); applied at
-promote time.
+Over budget → **split into sibling pages + a `[[wiki-link]]`** (good hygiene) — **never truncate**. The
+split is **promote's** job, not capture's (splitting is graph-aware judgment; capture stages the note
+whole — see Link Reconciliation §2). The doctor flags an over-budget body (invariant 14, severity W); promote resolves
+it during Step 2b link reconciliation.
 
 ## 🌲 Chained index (B-tree leaf)
 
@@ -235,7 +249,8 @@ are derived navigation, excluded from `iter_node_files`. Human escalation is the
 ## 🔔 Session start / end (nag only)
 
 Session start syncs to HEAD and emits **one-line nags** — staged-pending (sharper past the soft bound or
-with any `urgent`) and consolidation-overdue — and **never auto-runs** capture, promote, or consolidate
+with any `urgent`), a **held-contradiction lingering** past `held_max_age_days`, and consolidation-overdue
+— and **never auto-runs** capture, promote, or consolidate
 (HITL intrusion + violates deliberate-promote; read's tail-fold keeps routing correct meanwhile). Read
 stamps keep their **session-end batched flush** (one batched append + push per session), unchanged.
 
@@ -246,8 +261,11 @@ stamps keep their **session-end batched flush** (one batched append + push per s
 - Never store decay state (`strength`/`tier`) in a node — it lives in the index.
 - Never put a provisional `stg-` id into a real node or a read stamp; never stamp a staged atom.
 - Never invent folder structure on overflow — split by sub-key, then chain; escalate last.
-- Every staged atom must be promotable **cold** (self-sufficient provenance).
-- Clear staging only on a confirmed persist; abort leaves staging untouched.
+- Every staged atom must be promotable **cold** (self-sufficient provenance) — including a held atom.
+- Clear a promoted atom only on a confirmed persist (`clear_merged`); a full abort leaves staging
+  untouched. A contradiction **holds** the offending atom (local queue), it does not force an abort.
+- A held atom carries no graph-side state — it lives entirely in the local staging tier until a later
+  promote releases (re-reconciles) or drops it.
 
 > [!NOTE]
 > `mnx-promote` with empty staging is just "consolidate the graph" — carried by nag wording, not a

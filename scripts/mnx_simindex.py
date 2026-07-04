@@ -1,6 +1,6 @@
 """mnx_simindex.py — fuzzy link/dup candidate filter (W8). NON-AUTHORITATIVE.
 
-See docs/13-resilient-mesh-roadmap.md §2 (W8) and the S2 soft limit (docs/08).
+See docs/link-reconciliation.md §2 (W8) and the S2 soft limit (docs/08).
 
 The phonebook (W2) resolves an author's mention to an id by EXACT alias. This is its fuzzy
 twin: an approximate similarity index (MinHash over `summary + aliases`) used ONLY at promote

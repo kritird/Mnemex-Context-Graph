@@ -14,6 +14,7 @@ pytest.ini
 
 # Personal working notes / todo (not part of the published repo)
 LIMITATIONS.md
+docs/multi-agent-build-plan.md
 
 # OS
 .DS_Store

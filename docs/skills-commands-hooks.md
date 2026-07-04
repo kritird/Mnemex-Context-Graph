@@ -1,4 +1,4 @@
-# 🎛️ 04 — Skills, Commands, and Hooks
+# 🎛️ Skills, Commands, and Hooks
 
 Mnemex ships **six user-facing skills** (the agent-facing playbooks — `mnx-read`, `mnx-capture`,
 `mnx-promote`, `mnx-doctor`, `mnx-init`, and `mnx-status`) plus one **internal** skill (`mnx-consolidate`,
@@ -8,12 +8,12 @@ document gives the phase breakdown for each. The authoritative skill text lives 
 the command stubs in `commands/`; the hooks in `hooks/hooks.json`.
 
 Knowledge writing is split **capture / promote** (the `git commit` vs `git push`/PR of memory): see
-[`11-staging-and-promotion.md`](11-staging-and-promotion.md) for the full model. `mnx-capture` stages
+[`staging-and-promotion.md`](staging-and-promotion.md) for the full model. `mnx-capture` stages
 atoms locally; `mnx-promote` reconciles, merges, consolidates, and pushes them.
 
 A note on division of labor: **skills reason; scripts decide deterministically.** Anything that must
 be exact — decay math, id→path resolution, index regeneration, invariant checks, locking — is a
-script (Doc 06), not skill prose. The skill calls the script and reasons about the result.
+script (Script Contracts), not skill prose. The skill calls the script and reasons about the result.
 
 ```mermaid
 flowchart TD
@@ -52,7 +52,7 @@ flowchart TD
 3b. **Overlay staging.** For each routed cluster, also pull the local **staged** atoms
    (`mnx_stage.py overlay`): newest-wins, mark them `staged/unpromoted`, flag (never resolve)
    contradictions against graph nodes, never body-merge, never stamp. See
-   [`11-staging-and-promotion.md`](11-staging-and-promotion.md).
+   [`staging-and-promotion.md`](staging-and-promotion.md).
 4. **Expand on commit.** Resolve candidate ids → paths via the resolver (local index for intra-cluster,
    `cross-links.md` for cross-cluster). Load **only** the bodies you commit to. Follow edges within a
    frontier budget (max nodes / max tokens per hop) — beam search, not BFS-load-everything.
@@ -63,7 +63,7 @@ flowchart TD
    (no body load). If `stale_after` is non-null and `now > stale_after`, mark the atom **`stale`** in the
    returned context and attach a **refresh cue** — *"⏳ last verified Nd ago (horizon Md); re-derive from
    source and confirm before relying on this."* Cue each atom **at most once per session** (per-session
-   marker, same mechanism as the Stop hook). This is a *signal*, not a mutation — see Doc 14 §5. If, during
+   marker, same mechanism as the Stop hook). This is a *signal*, not a mutation — see Freshness & Revalidation §5. If, during
    the task, the model re-derives the fact and finds it **still correct**, it appends a `revalidated` stamp
    in step 6; if it **changed**, it stages an update via `mnx-capture`; if it **cannot verify** in-session,
    it does nothing (the atom stays stale, the cue returns next session).
@@ -86,7 +86,7 @@ flowchart TD
 Runs **in the same session** that built the artifact, so it can read the artifact *and* the human
 review/clarification points from context (those are where the *how* lives and exist only in the
 conversation). Capture is the **local `git commit` half**: it stages atoms and **never touches the
-graph** — no reconcile, no lock, no push. Full model: [`11-staging-and-promotion.md`](11-staging-and-promotion.md).
+graph** — no reconcile, no lock, no push. Full model: [`staging-and-promotion.md`](staging-and-promotion.md).
 
 Run it **incrementally at checkpoints**, not only at the end: because the transcript shrinks at every
 compaction, one end-of-session dump is the most loss-exposed way to capture. Capture consults what is
@@ -104,7 +104,7 @@ or a compaction is imminent (see the **PreCompact** hook below) is cheap and saf
    (split oversized atoms + an edge; never truncate). **Propose `volatility`** from the atom's content shape
    — a body that is a URL / version / price / on-call name ⇒ `volatile`; a definition / invariant ⇒
    `timeless`; else `default`. This is a *suggestion* the human confirms or overrides at the promote gate
-   (Doc 14 §4).
+   (Freshness & Revalidation §4).
 3. **Score** each atom `now | later | not-needed` — intrinsic importance, **not** novelty. `now` ⇒ stage
    `--urgent`; `later` ⇒ stage; `not-needed` ⇒ **silent drop**.
 4. **Stage** (the only write). `mnx_stage.py add` writes each kept atom with **self-sufficient
@@ -140,7 +140,7 @@ any contradiction is a **hard HITL block** (resolve in-cycle or abort). The orde
 **No slash command.** Invoked by `mnx-promote` over the post-merge graph, contributing its decisions to
 promote's single plan / lock / doctor / push. (Runnable standalone only for deliberate forced
 maintenance.) The algorithm is **snapshot-then-apply**, specified in full in
-[`05-maintenance-pass-algorithm.md`](05-maintenance-pass-algorithm.md). In brief:
+[`maintenance-pass-algorithm.md`](maintenance-pass-algorithm.md). In brief:
 
 - **Re-normalize first** if `config_version`/`λ` changed (continuity across a parameter change).
 - **Phase A — MARK (read-only, parallelizable):** freeze snapshot + `cross-links.md`; replay registry
@@ -162,7 +162,7 @@ maintenance.) The algorithm is **snapshot-then-apply**, specified in full in
 
 **Command:** `/mnemex:mnx-doctor [--fix] [--team <name>]`
 
-Checks every invariant (full list in [`08-invariants-and-failure-modes.md`](08-invariants-and-failure-modes.md)):
+Checks every invariant (full list in [`invariants-and-failure-modes.md`](invariants-and-failure-modes.md)):
 edge targets exist; front-matter schema valid; index node-set matches folder; `summary`/`aliases`
 denormalized copies fresh; reverse-edge map consistent; no dangling edges (incl. cold and tombstoned);
 `hot` section ≤ `hot_k`; cross-links complete and path-accurate; orphans flagged. With `--fix` it
@@ -192,10 +192,10 @@ defaults, `.mnemex/` state, a first `team-<name>/` skeleton) and writes the bind
 first contact with a graph that has no `mnemex.config.md` it writes one from defaults. At create it states
 the two time-horizon defaults for the user — *"unused facts halve in relevance every `half_life_days` (180);
 facts go **stale** and get re-checked after `freshness_ttl_days` (30) — patterns get +30% on both"* — so both
-clocks are a conscious choice, not a silent default (Doc 07, Doc 14). It never writes
+clocks are a conscious choice, not a silent default (Configuration, Freshness & Revalidation). It never writes
 graph-behavior parameters into a binding (those live only in the graph's `mnemex.config.md`), never
 overwrites an existing binding without confirmation, and never clones by hand — `sync` does that. Full
-spec: [`10-binding-and-graph-sync.md`](10-binding-and-graph-sync.md).
+spec: [`binding-and-graph-sync.md`](binding-and-graph-sync.md).
 
 For a **git remote** it runs a read-only pre-flight (`mnx_binding.py probe-remote --remote <url>`,
 a `git ls-remote` with interactive prompts disabled) *before* writing the binding: on an

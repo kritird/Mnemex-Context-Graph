@@ -1,6 +1,6 @@
 """mnx_stage.py — the capture staging tier (local, per-author, between session and graph).
 
-Background: docs/11-staging-and-promotion.md, CAPTURE-PROMOTE-PLAN.md.
+Background: docs/staging-and-promotion.md, CAPTURE-PROMOTE-PLAN.md.
 
 `mnx-capture` extracts durable atoms from the live session and STAGES them here — cheaply,
 locally, with no lock and no graph mutation. `mnx-promote` later reconciles + merges the whole
@@ -46,7 +46,7 @@ ATOMS_DIRNAME = "atoms"
 HELD_DIRNAME = "held"     # per-atom held-contradictions queue (W9)
 ID_PREFIX = "stg-"
 VALID_SCORES = {"now", "later"}  # 'not-needed' is silently dropped, never staged
-VALID_VOLATILITY = {"default", "timeless", "volatile"}  # + a positive int (day count); Doc 14
+VALID_VOLATILITY = {"default", "timeless", "volatile"}  # + a positive int (day count); Freshness & Revalidation
 
 
 def _norm_volatility(v: Any) -> Any:
@@ -161,6 +161,25 @@ def _normalize(atom: dict[str, Any]) -> dict[str, Any]:
     }
     if atype == "pattern":
         out["trigger"] = (atom.get("trigger") or "").strip()
+    out["mentions"] = _hoist_mentions(out["body"], atom.get("mentions"))
+    return out
+
+
+def _hoist_mentions(body: str, explicit: Any = None) -> list[dict[str, Any]]:
+    """Hoist the body's inline [[wiki-links]] into a mentions list (Link Reconciliation §2 — capture preserves
+    links; promote resolves them). `resolved_id` is always null at capture. An explicit mentions
+    list may carry an optional `type` per name (the rare typed link); it is merged by name."""
+    types: dict[str, str] = {}
+    for m in (explicit or []):
+        if isinstance(m, dict) and m.get("name") and m.get("type"):
+            types[m["name"].strip().lower()] = m["type"]
+    out: list[dict[str, Any]] = []
+    for wl in mnx_common.parse_wikilinks(body):
+        entry = {"name": wl["name"], "resolved_id": None}
+        t = types.get(wl["name"].strip().lower())
+        if t:
+            entry["type"] = t
+        out.append(entry)
     return out
 
 
@@ -183,6 +202,8 @@ def _serialize(atom: dict[str, Any], pid: str, staged_at: str) -> str:
     }
     if atom["type"] == "pattern":
         fm["trigger"] = atom["trigger"]
+    if atom.get("mentions"):
+        fm["mentions"] = atom["mentions"]
     block = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).strip()
     return f"---\n{block}\n---\n\n{atom['body']}\n"
 

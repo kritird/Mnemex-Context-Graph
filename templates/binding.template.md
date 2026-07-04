@@ -20,4 +20,4 @@ A **local folder** that is itself a git repo gets a local commit per change; a p
 gets an append-only audit trail in its `.mnemex/history.log`. A **git remote** commits and pushes.
 
 Commit this file to share the binding with the team, or add `.mnemex.md` to `.gitignore` to keep it
-personal. See `docs/10-binding-and-graph-sync.md`.
+personal. See `docs/binding-and-graph-sync.md`.

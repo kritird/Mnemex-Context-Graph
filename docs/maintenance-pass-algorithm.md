@@ -1,4 +1,4 @@
-# ♻️ 05 — The Maintenance Pass Algorithm
+# ♻️ The Maintenance Pass Algorithm
 
 `mnx-consolidate` carries three coupled jobs — **compaction, re-tiering, budget handling** — plus death
 and edge hygiene. It is **not a user command**: it is the **back half of `mnx-promote`**, run over the
@@ -10,7 +10,7 @@ belong to promote). Coupling makes ordering critical. The whole algorithm is bui
 > apply them all. **Never read state you have already mutated within the same pass.**
 
 This one rule resolves the ordering-corruption, the structural-strength-staleness, and most of the
-concurrency hazards catalogued in [`08-invariants-and-failure-modes.md`](08-invariants-and-failure-modes.md).
+concurrency hazards catalogued in [`invariants-and-failure-modes.md`](invariants-and-failure-modes.md).
 
 Acronyms: **HWM** = High-Water Mark; **TTL** = Time-To-Live.
 
@@ -44,14 +44,14 @@ flowchart TD
 ## 🔐 Pre-flight
 
 ```
-acquire team.lock                        # one mutating op per team (Doc 02 §9)
-if pass.plan.json exists AND tree dirty:  # crash recovery (Doc 02 §10)
+acquire team.lock                        # one mutating op per team (Architecture §9)
+if pass.plan.json exists AND tree dirty:  # crash recovery (Architecture §10)
     offer `git checkout .`; on confirm, restore last good commit
 if config_version/λ changed since .mnemex/config_version:
     RE-NORMALIZE: recompute every node's stored strength so that
         score_new(now) == score_old(now)   (continuity across the parameter change)
     if freshness_ttl_days / freshness_pattern_bonus changed:
-        recompute stale_after for every node from its verified + the new horizon   # Doc 14 §8
+        recompute stale_after for every node from its verified + the new horizon   # Freshness & Revalidation §8
     stamp new config_version/λ
 ```
 
@@ -78,7 +78,7 @@ for each cluster C in SNAPSHOT:
             s = min(STRENGTH_MAX, decay(s, d.ts→now) + boost(d.role) · recall_bonus(X, s))
         score[X] = s
 
-        # 1b. Freshness (independent of strength; Doc 14): fold revalidation events, recompute horizon
+        # 1b. Freshness (independent of strength; Freshness & Revalidation): fold revalidation events, recompute horizon
         verified[X] = X.verified or X.updated                 # migration backfill if absent
         for d in deltas where d.id == X.id and d.role == 'revalidated':
             verified[X] = max(verified[X], d.ts)              # monotonic; weight 0 — never touches strength
@@ -98,7 +98,7 @@ for each node X:
 # 4. Death candidates (CONJUNCTION gate + edge safety)
 for each node X in cold tier:
     if volatility(X) == 'timeless':
-        continue                                              # PINNED: timeless never auto-dies (Doc 14 §7)
+        continue                                              # PINNED: timeless never auto-dies (Freshness & Revalidation §7)
     if score[X] low AND struct[X] weak AND (now > expires[X]):
         if X is the SOLE referrer of any still-active node D:
             demote-reluctant: keep X warm (its structural role to D protects it)   # no orphan cascade
@@ -146,7 +146,7 @@ regenerate affected index.md sections (HOT/WARM/COLD), denormalizing summary+ali
 delta-update team/cross-links.md from changed boundary edges
 
 # 3. telemetry checkpoints
-advance HWM[C] for every compacted cluster      # checkpoint, do NOT truncate (Doc 02 §2)
+advance HWM[C] for every compacted cluster      # checkpoint, do NOT truncate (Architecture §2)
 stamp .mnemex/last_compaction[team], config_version/λ
 
 # 4. verify + commit
@@ -168,7 +168,7 @@ succeeded and validated) or it does not (recover from the plan on next run).
 | Re-normalize before tiering | Nodes flash-cold when half-life is edited (retroactive drift). |
 | Mark is read-only; struct measured once | Order-dependent, non-deterministic tier outcomes. |
 | Sole-referrer reluctance in mark | Orphan cascade — killing a node that is some live node's only inbound. |
-| Timeless exemption in mark | Auto-death of a foundational fact that decayed in heat but is permanently true (Doc 14). |
+| Timeless exemption in mark | Auto-death of a foundational fact that decayed in heat but is permanently true (Freshness & Revalidation). |
 | Truth mutations before derived rebuild | Index/cross-links rebuilt from stale node state. |
 | Sever edges transactionally, cold included | Dangling edges to tombstoned nodes; cold nodes missed by a partial reverse map. |
 | HWM advance, not truncate | Lost stamps from a read racing the compaction window. |

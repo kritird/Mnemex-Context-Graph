@@ -9,7 +9,7 @@ Mnemex separates two repos: the **project** the author works in, and the **graph
 is stored. This skill establishes the **binding** between them. Every other skill (`mnx-read`,
 `mnx-capture`, `mnx-promote`, `mnx-doctor`) resolves that binding before doing anything; if it is missing
 they stop and send the user here. (`mnx-capture` is the exception that needs only the binding, not a
-synced clone — it writes to the local staging tier.) Background: `docs/10-binding-and-graph-sync.md`.
+synced clone — it writes to the local staging tier.) Background: `docs/binding-and-graph-sync.md`.
 
 Helper you call: `scripts/mnx_binding.py` (resolve / sync / status / probe-remote).
 

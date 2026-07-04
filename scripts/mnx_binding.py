@@ -10,7 +10,7 @@ Persistence is kind-aware (see persist()):
   * plain-local -> append an audit record to <graph>/.mnemex/history.log
 
 This is the FIRST implemented helper (not a contract stub): self-contained, deterministic,
-stdlib + PyYAML only. See docs/10-binding-and-graph-sync.md and docs/06-script-contracts.md.
+stdlib + PyYAML only. See docs/binding-and-graph-sync.md and docs/script-contracts.md.
 
 Resolution precedence (most specific wins); within a source, graph_path beats graph_remote:
     1. <project>/.mnemex.md         (nearest ancestor of cwd)
@@ -146,6 +146,44 @@ class Binding:
         """Local folder holding this graph's capture staging atoms + read-stamp spill."""
         return str(staging_path_for(self))
 
+    def source_kind(self) -> str:
+        """The bucket of the resolution source: 'project' | 'env' | 'user'."""
+        return self.source.split(":", 1)[0]
+
+    def source_path(self) -> Optional[str]:
+        """The file the binding came from, for project/user sources (None for env)."""
+        return self.source.split(":", 1)[1] if ":" in self.source else None
+
+    def is_default_fallback(self) -> bool:
+        """True when NO project `.mnemex.md` (and no env) matched and we fell through to the
+        user-default graph. This is the silent case worth flagging prominently at capture/read
+        time — the author may not realize they are writing into their personal graph."""
+        return self.source_kind() == "user"
+
+    def display_name(self) -> str:
+        """Human-readable graph name: the repo name (remote) or the folder name (local)."""
+        if self.local_path:
+            return Path(self.local_path).expanduser().name or self.local_path
+        tail = re.sub(r"\.git$", "", self.remote.rstrip("/").rsplit("/", 1)[-1])
+        return tail or self.remote
+
+    def resolution_line(self) -> str:
+        """One-line 'which graph, and why' for a skill to echo at capture/read/promote time.
+
+        Removes the silent-binding gap (LIMITATIONS.md #2): the author is always shown which graph,
+        and via which source, they are about to act on — so a wrong-cwd or personal-default misfire
+        is caught at capture time, not promote time."""
+        kind = self.source_kind()
+        if kind == "project":
+            detail = f"source: project {os.path.basename(self.source_path() or BINDING_FILENAME)}"
+        elif kind == "env":
+            detail = "source: environment variable"
+        elif kind == "user":
+            detail = "source: user default — no project binding found, using your personal graph"
+        else:
+            detail = f"source: {self.source}"
+        return f"{self.display_name()} ({detail})"
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "graph_remote": self.remote,
@@ -157,6 +195,10 @@ class Binding:
             "default_team": self.default_team,
             "author": self.author,
             "source": self.source,
+            "source_kind": self.source_kind(),
+            "display_name": self.display_name(),
+            "resolution": self.resolution_line(),
+            "default_fallback": self.is_default_fallback(),
             "warning": self.warning,
         }
 

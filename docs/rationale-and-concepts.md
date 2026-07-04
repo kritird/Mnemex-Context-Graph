@@ -1,4 +1,4 @@
-# 🧩 01 — Rationale and Core Concepts
+# 🧩 Rationale and Core Concepts
 
 This document defines every core concept and explains *why* it is shaped the way it is. Acronyms are
 expanded on first use.

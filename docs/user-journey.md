@@ -1,4 +1,4 @@
-# 🧭 12 — The User Journey (install → daily use)
+# 🧭 The User Journey (install → daily use)
 
 > Part of the **Mnemex Context Graph** standard. The other docs specify *what each piece is*; this one
 > walks the **whole arc end-to-end** — from `pip install` to a routine working day — and marks every
@@ -70,7 +70,7 @@ pip install pyyaml
 > [!NOTE]
 > After install, the **skills** and **commands** are live immediately. The **hooks** (`hooks/hooks.json`)
 > take effect after `/reload-plugins` or a restart — a one-time lifecycle detail noted in
-> [`04-skills-commands-hooks.md`](04-skills-commands-hooks.md).
+> [`skills-commands-hooks.md`](skills-commands-hooks.md).
 
 ---
 
@@ -112,7 +112,7 @@ flowchart TD
 > [!IMPORTANT]
 > 🧱 **The binding answers "which graph, as whom."** The graph's *behavior* (half-life, tiers, budgets)
 > lives only in `mnemex.config.md` **inside the graph** — never duplicated into the binding, so two
-> authors can't decay one graph differently. Full model: [`10-binding-and-graph-sync.md`](10-binding-and-graph-sync.md).
+> authors can't decay one graph differently. Full model: [`binding-and-graph-sync.md`](binding-and-graph-sync.md).
 
 ---
 
@@ -150,7 +150,7 @@ sequenceDiagram
 > [!NOTE]
 > 🔐 For a **remote** graph the clone is hard-reset to remote HEAD here — which is exactly why your
 > local staged captures and un-flushed stamps live **outside** the clone and survive the resync. See
-> [`11-staging-and-promotion.md`](11-staging-and-promotion.md).
+> [`staging-and-promotion.md`](staging-and-promotion.md).
 
 ---
 
@@ -270,9 +270,10 @@ flowchart TD
 | `--retry-push` | 🟣 command | If push failed *after* commit, lands the existing commit (never re-merges — avoids a double-apply). |
 
 > [!WARNING]
-> 🧯 Promote is **atomic + total**: every staged atom reaches a terminal disposition in one cycle, **any
-> contradiction is a hard human block** (resolve in-cycle or abort), and staging clears **only** on a
-> confirmed persist. There is no half-merged limbo. Full contract: [`11-staging-and-promotion.md`](11-staging-and-promotion.md).
+> 🧯 Promote disposes **per-atom**: every clean atom reaches a terminal disposition and clears **only** on
+> a confirmed persist; a **contradiction** is a hard human block — resolve it in-cycle or **hold** that
+> atom in the local queue (the rest still promotes), or abort the whole promote. Held state is purely
+> local — there is no half-merged limbo on the graph. Full contract: [`staging-and-promotion.md`](staging-and-promotion.md).
 
 ---
 
@@ -363,7 +364,7 @@ flowchart LR
 
 ## ➡️ Where to go next
 
-- 🧩 The *why* behind every concept here: [`01-rationale-and-concepts.md`](01-rationale-and-concepts.md)
-- 🎛️ Skill/command/hook specifics: [`04-skills-commands-hooks.md`](04-skills-commands-hooks.md)
-- 📥 The capture/promote split in depth: [`11-staging-and-promotion.md`](11-staging-and-promotion.md)
-- 🔗 How binding & sync actually work: [`10-binding-and-graph-sync.md`](10-binding-and-graph-sync.md)
+- 🧩 The *why* behind every concept here: [`rationale-and-concepts.md`](rationale-and-concepts.md)
+- 🎛️ Skill/command/hook specifics: [`skills-commands-hooks.md`](skills-commands-hooks.md)
+- 📥 The capture/promote split in depth: [`staging-and-promotion.md`](staging-and-promotion.md)
+- 🔗 How binding & sync actually work: [`binding-and-graph-sync.md`](binding-and-graph-sync.md)

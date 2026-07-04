@@ -1,6 +1,6 @@
 """mnx_index.py — index regeneration (derived from truth; never the reverse).
 
-See docs/06-script-contracts.md and docs/03-data-model-and-schemas.md §3.
+See docs/script-contracts.md and docs/data-model-and-schemas.md §3.
 
 The index is GENERATED from the nodes. It denormalizes each node's summary+aliases
 (so matching needs no body load), carries the materialized strength/last_update, and
@@ -132,7 +132,7 @@ STALE_NULL = "—"   # rendered in the stale_after column for timeless / dead no
 
 
 def _stale_after(node: dict[str, Any], cfg: dict[str, Any]) -> str:
-    """Denormalized freshness horizon for the index (Doc 14). '—' when the node never goes stale."""
+    """Denormalized freshness horizon for the index (Freshness & Revalidation). '—' when the node never goes stale."""
     return mnx_config.resolve_horizon(node, cfg) or STALE_NULL
 
 
@@ -396,7 +396,7 @@ def denorm_check(cluster: str) -> list[dict[str, Any]]:
                 if mnx_common.aliases_from_index(row.get("aliases", "")) != want_aliases:
                     drift.append({"id": row["id"], "field": "aliases",
                                   "index": row.get("aliases"), "node": "; ".join(want_aliases)})
-                # Freshness denormalization (Doc 14 §9): the index's stale_after must equal the
+                # Freshness denormalization (Freshness & Revalidation §9): the index's stale_after must equal the
                 # node's resolved horizon. A stale_after column is only present in newer indexes,
                 # so an absent cell is treated as not-yet-materialized, not drift.
                 if "stale_after" in row:

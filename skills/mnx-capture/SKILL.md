@@ -1,6 +1,6 @@
 ---
 name: mnx-capture
-description: Capture the durable knowledge produced in the current build session into the local Mnemex staging tier — cheap, fast, no lock, no graph mutation. Use this whenever a user finishes building or designing something and wants to persist what was learned — domain facts AND the patterns/decisions surfaced in human review — or says "save this to the knowledge graph", "remember this for next time", "capture this", "stage this". Run it INCREMENTALLY at natural checkpoints too — after a sub-task lands, a review decision settles, or the harness signals a compaction is about to summarize away transcript detail — not only at the very end: it consults what is already staged and stages only the delta (re-capturing identical content is a no-op), so capturing keypoints as they happen is cheap and loss-proof. Runs in the same session so it can read the artifact and the review/clarification points from the transcript. Extracts atoms, scores each now/later/not-needed, and stages them with self-sufficient provenance. It also curates staging — review what is staged, drop one atom (--drop <id>), or discard all un-promoted captures (--discard-all) — which is the cheap escape valve when staging hits its hard cap. It does NOT reconcile or merge into the shared graph — that is the deliberate, batched /mnemex:mnx-promote step.
+description: Capture the durable knowledge produced in the current build session into the local Mnemex staging tier — cheap, fast, no lock, no graph mutation. Use this when a user finishes building or designing and wants to persist what was learned — domain facts AND the patterns/decisions from human review — or says "save this to the knowledge graph", "remember this for next time", "capture this", "stage this". Run it INCREMENTALLY at natural checkpoints too, not only at session end — after a sub-task lands, a review settles, or a compaction is signalled — staging only the delta (re-capturing identical content is a no-op), keeping keypoints loss-proof. Runs in-session to mine the artifact and review points from the transcript; extracts atoms, scores each now/later/not-needed, stages them with self-sufficient provenance. Also curates staging (--drop <id>, --discard-all) — the escape valve at the hard cap. Does NOT reconcile or merge into the shared graph — that is the deliberate, batched /mnemex:mnx-promote step.
 ---
 
 # mnx-capture — stage a session's knowledge (the `git commit` of memory)
@@ -14,16 +14,14 @@ Capture is the **fast, local half** of the capture/promote split. It is cheap, t
 reads the graph's cluster indexes, and **never mutates the graph**. Reconcile / merge / consolidate /
 push all happen later in `/mnemex:mnx-promote`. (Analogy: capture = `git commit`; promote = `git push`/PR.)
 
-**Capture incrementally, at checkpoints — not only at the very end.** Because the *how* lives in a
-transcript that shrinks at every compaction, one end-of-session dump is the most loss-exposed way to
-run this. Prefer to capture the **delta** whenever the session reaches a natural checkpoint — a
-sub-task lands, a review decision is settled, or the harness signals a compaction is coming. Capture is
-built for this: it consults what is already staged and stages only what is new, and re-staging identical
-content is an idempotent no-op (the provisional id is a content hash). So running it repeatedly is safe
-and cheap — each pass just extends the staged set with the newest keypoints, then you carry on.
+**Capture incrementally, at checkpoints — not only at the very end.** Since that transcript shrinks at
+every compaction, one end-of-session dump is the most loss-exposed way to run this: prefer to capture the
+**delta** at each natural checkpoint (a sub-task lands, a review decision settles, a compaction is
+signalled). Capture is built for repetition — it stages only what is new and re-staging identical content
+is an idempotent no-op (content-hash id) — so it stays cheap; the delta mechanics are Phase 0b + Phase 1.
 
-Background: `docs/11-staging-and-promotion.md` (the whole model), `docs/01-rationale-and-concepts.md`
-(node types, ids), `docs/03-data-model-and-schemas.md` (staged-atom front-matter). Helper:
+Background: `docs/staging-and-promotion.md` (the whole model), `docs/rationale-and-concepts.md`
+(node types, ids), `docs/data-model-and-schemas.md` (staged-atom front-matter). Helper:
 `mnx_stage` (the only writer here) and `mnx_binding` (locate the graph).
 
 ## Curate mode — review / drop / discard (no extraction)
@@ -83,14 +81,26 @@ covers — extract the **new** keypoints since your last capture. For each, deci
   because…"* — with a trigger describing the situation it governs.
 
 Draft `summary` (one line), `aliases` (other names the concept goes by), `domain` (routing key(s)),
-and a tight body. **Propose a `volatility`** (freshness horizon, Doc 14) from the atom's content shape —
+and a tight body. **Propose a `volatility`** (freshness horizon, Freshness & Revalidation) from the atom's content shape —
 `volatile` for a fact that rots fast (a URL, version, price, on-call name), `timeless` for a durable
 definition/invariant (also exempts it from ever auto-dying), or leave it `default` (the type-derived
 horizon) for everything else. It is a *suggestion*: the human confirms or overrides it at the promote
-gate, so bias toward `default` when unsure. **Node-size budget (completeness-of-atom, not brevity):** keep each atom's body
-under the soft cap (`node_body_max_chars`, default ~6000). If a unit is genuinely bigger, **split it
-into multiple atoms and capture an edge between them** (good hygiene) — never truncate to fit. Cap the
-number of atoms per session to what the session actually produced; do not pad.
+gate, so bias toward `default` when unsure.
+
+**Embed links inline as `[[wiki-links]]` (the mesh authoring surface, Link Reconciliation).** When a note refers to
+another concept, name it inline in the body with double brackets — *"…settles against
+`[[iso8583-field124]]` before posting…"*. Link freely **by name**, even to a page that does not exist in
+the graph yet: promote resolves each `[[name]]`, and an unresolved one becomes a **red-link** that goes
+live automatically the day that page is created. The pipe means display text, wiki-native
+(`[[iso8583-field124|Field 124]]`), **not** a relationship type. `mnx_stage` hoists these into the atom's
+`mentions:` for you — you just write natural `[[links]]`. Do **not** hand-author `edges:`; that is a
+generated mirror promote builds.
+
+**Node-size budget — do NOT split at capture.** Keep each atom's body focused, but if a genuinely
+single idea runs past the soft cap (`node_body_max_chars`, default ~6000), **capture it whole** — never
+truncate. **Splitting an over-budget note into sibling pages + a link is promote's job, not capture's**
+(promote is graph-aware; capture is local and dumb). Cap the number of atoms per session to what the
+session actually produced; do not pad.
 
 ## Phase 2 — Score each atom (`now | later | not-needed`)
 A momentary judgement of **intrinsic importance — NOT novelty**. Drift between sessions is fine; there
@@ -118,7 +128,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stage.py" add --json <<'JSON'
   "provenance": { "artifact": "tap-vic-settlement-spec", "reviews": ["r3","r7"],
                   "rejected": ["post-then-reconcile (causes orphaned legs)"],
                   "rationale": "human correction in review r7" },
-  "body": "Always reconcile the settlement batch before posting legs, because …" }
+  "body": "Always reconcile the settlement batch against [[iso8583-field124]] before posting legs, because …" }
 JSON
 ```
 
@@ -140,4 +150,5 @@ room. Then stop — **do not** offer to push or merge; that is promote's job.
 - Never write into `graph_root`, never take the team lock, never commit or push.
 - Never stamp a staged atom or give it a real node id (the `stg-` provisional id is content-derived).
 - Never `not-needed`-drop on a *novelty* guess — only the clearly ephemeral/derivable.
-- Never truncate an over-budget atom — split into atoms + an edge.
+- Never split, resolve a `[[link]]`, or hand-author `edges:` — capture preserves links; **promote** splits
+  over-budget notes and resolves links (Link Reconciliation). Never truncate an over-budget atom — capture it whole.

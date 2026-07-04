@@ -1,4 +1,4 @@
-# 📖 09 — Appendix: Glossary, Acronyms, Parameters, FAQ
+# 📖 Appendix: Glossary, Acronyms, Parameters, FAQ
 
 ---
 
@@ -28,7 +28,7 @@ created and severed.
 in the write skill, not in graph data; essentially never deleted.
 
 **Freshness** — the validity axis, orthogonal to heat: `fresh` vs `stale`, driven by the `verified`
-clock rather than by access. A `hot` fact can be `stale`. See *revalidation*, *truth decay* (Doc 14).
+clock rather than by access. A `hot` fact can be `stale`. See *revalidation*, *truth decay* (Freshness & Revalidation).
 
 **Hot tier** — the top-K most-relevant nodes per cluster, listed in the index's chunk-1; zero extra
 read hops.
@@ -53,7 +53,7 @@ produced it.
 
 **Revalidation** — re-confirming a stale atom against its source on read: unchanged ⇒ a weight-0
 `revalidated` stamp advances `verified`; changed ⇒ capture→promote; obsolete ⇒ supersede. Read-triggered
-only — no proactive refresh sweep (Doc 14).
+only — no proactive refresh sweep (Freshness & Revalidation).
 
 **`stale_after`** — the precomputed freshness horizon (`verified + resolved horizon`) denormalized onto
 each index row; read flags an atom `stale` when `now > stale_after`; null for `timeless`/dead nodes.

@@ -1,8 +1,8 @@
 """mnx_decay.py — the relevance math (pure functions, no I/O).
 
-Deterministic given inputs. See docs/02-architecture.md and docs/06-script-contracts.md.
+Deterministic given inputs. See docs/architecture.md and docs/script-contracts.md.
 
-The model (Doc 02 §1):
+The model (Architecture §1):
     score(now) = strength · exp(−λ · Δt),   Δt = max(0, now − last_update)  [days]
     λ = ln(2) / half_life_days
 On a confirmed use:  strength = min(strength_max, score(now) + boost(role)·recall_bonus)
@@ -42,7 +42,7 @@ def freshness_horizon_days(node_type: str, cfg: dict[str, Any]) -> float:
 
     Orthogonal to decay: domain → freshness_ttl_days; pattern → ·(1+freshness_pattern_bonus)
     (a durable *how* is re-checked less often). Volatility overrides live in mnx_config.resolve_horizon.
-    See docs/14-freshness-and-revalidation.md."""
+    See docs/freshness-and-revalidation.md."""
     ttl = float(cfg.get("freshness_ttl_days", 30))
     if node_type == "pattern":
         return ttl * (1.0 + float(cfg.get("freshness_pattern_bonus", 0.0)))

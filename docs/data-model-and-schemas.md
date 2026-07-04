@@ -1,4 +1,4 @@
-# 🗃️ 03 — Data Model and File Schemas
+# 🗃️ Data Model and File Schemas
 
 Exact on-disk formats for every file the protocol reads or writes. All front-matter is YAML; all
 timestamps are UTC ISO-8601 (`2026-06-28T14:03:00Z`). Templates live in `templates/`.
@@ -64,7 +64,7 @@ flowchart TD
 A node is **pure knowledge**. It carries **no** `strength`, `last_update`, `tier`, or `last_used` —
 those are materialized in the index. The node's front-matter copies that the *index* needs for
 matching (`summary`, `aliases`) are authored here and denormalized into the index by the write/gc
-apply step (the validator keeps them in sync — see Doc 08).
+apply step (the validator keeps them in sync — see Invariants & Failure Modes).
 
 ```markdown
 ---
@@ -76,12 +76,14 @@ aliases: [field 124, DE124, data element 124, stablecoin routing field]
 domain: [settlement]            # may be a LIST: a node can belong to >1 sub-index (routing DAG)
 status: active                  # active | dead   (retired-why lives in fields: superseded-by, died)
 confidence: high                # high | medium | low
-volatility: default             # default | timeless | volatile | <int days> — freshness horizon (Doc 14)
+volatility: default             # default | timeless | volatile | <int days> — freshness horizon (Freshness & Revalidation)
 trigger: null                   # REQUIRED for type: pattern; null for domain (see below)
-edges:                          # OUTGOING edge instances, owned by this node
-  - { to: ledger-routing,    type: routes-through }
+mentions:                       # authored links, by NAME. GENERATED from body [[wiki-links]] at promote (Link Reconciliation).
+  - { name: ledger-routing,  resolved_id: ledger-routing, type: null }   # live link (untyped default)
+  - { name: de124-legacy,    resolved_id: null,           type: null }   # 🔴 red-link: no page yet (latent)
+edges:                          # OUTGOING edges. GENERATED MIRROR of resolved `mentions` (Link Reconciliation §8).
+  - { to: ledger-routing,    type: null }        # untyped by default; type optional (routes-through, …)
   - { to: pat-settle-recon,  type: governed-by }
-  - { to: iso8583-spec,      type: defined-in }
 references:                     # SOFT, cross-TEAM pointers ONLY. Not integrity-guaranteed.
   - { to: risk-settlement-finality, team: team-risk, note: "related finality model" }
 provenance:
@@ -90,7 +92,7 @@ provenance:
   session: 2026-06-01T09:12:00Z
 created: 2026-06-01T09:12:00Z
 updated: 2026-06-01T09:12:00Z   # meaning-change timestamp (NOT usage)
-verified: 2026-06-01T09:12:00Z  # last confirmed-still-true timestamp (NOT usage, NOT meaning-change). Doc 14
+verified: 2026-06-01T09:12:00Z  # last confirmed-still-true timestamp (NOT usage, NOT meaning-change). Freshness & Revalidation
 ---
 
 ## Summary
@@ -113,7 +115,7 @@ verified: 2026-06-01T09:12:00Z  # last confirmed-still-true timestamp (NOT usage
 only — never `updated`, never strength. `volatility` selects the atom's revalidation horizon
 (`default` → derived from type; `timeless` → never stale **and never auto-dies**; `volatile` / `<int days>`
 → short/explicit). The horizon is materialized into the index as `stale_after` (§3). Full model:
-[`14-freshness-and-revalidation.md`](14-freshness-and-revalidation.md).
+[`freshness-and-revalidation.md`](freshness-and-revalidation.md).
 
 ### Pattern nodes
 
@@ -168,8 +170,8 @@ memory state**.
 Notes:
 - `summary` and `aliases` are **denormalized copies** of the node's values — the validator enforces
   `index.summary == node.summary` and `index.aliases == node.aliases`.
-- `strength`/`last_update` are the materialized decay state (Doc 02).
-- `stale_after` is the **precomputed freshness horizon** (Doc 14): read flags an atom `stale` when
+- `strength`/`last_update` are the materialized decay state (Architecture).
+- `stale_after` is the **precomputed freshness horizon** (Freshness & Revalidation): read flags an atom `stale` when
   `now > stale_after`. It is denormalized from the node like `summary`/`aliases` (validator-enforced), is
   `—`/null for `timeless` and dead (retired) nodes, and is recomputed by consolidation. It is independent
   of `expires` (the Cold-tier death time) — a node can be stale long before it is near death, or fresh yet
@@ -179,7 +181,7 @@ Notes:
   first cold chunk and a `## Continuations` list, and the overflow spills into ordered continuation
   files `index.001.md`, `index.002.md`, … (B-tree-leaf style). One head-read still routes; a deep cold
   search walks the chain. Consumers needing the full node-set merge head + continuations
-  (`mnx_index.index_node_ids`). See [`11-staging-and-promotion.md`](11-staging-and-promotion.md).
+  (`mnx_index.index_node_ids`). See [`staging-and-promotion.md`](staging-and-promotion.md).
 
 ---
 
@@ -197,10 +199,10 @@ __maintenance-due__ 2026-06-27T08:00:00Z    flag           0
 ```
 
 Columns: `id`, `ts` (UTC ISO-8601), `role`, `weight`. The `__maintenance-due__` sentinel is the
-read-skill's overdue flag (Doc 02 §7). The `revalidated` role (weight `0`) is a **freshness** event, not a
+read-skill's overdue flag (Architecture §7). The `revalidated` role (weight `0`) is a **freshness** event, not a
 usage boost: read appends it when the model re-confirms a stale atom is still true; consolidation consumes it
-to advance the node's `verified` and does **not** fold it into strength (Doc 14). Compaction replays lines
-**after** the cluster's high-water mark and advances the mark; it does not delete (Doc 02 §2).
+to advance the node's `verified` and does **not** fold it into strength (Freshness & Revalidation). Compaction replays lines
+**after** the cluster's high-water mark and advances the mark; it does not delete (Architecture §2).
 
 ---
 
@@ -226,7 +228,7 @@ node front-matter and carry a disclaimer; they never enter structural strength o
 ## 6️⃣ Config file (`mnemex.config.md`)
 
 Markdown with a YAML front-matter block (so it is human-readable *and* machine-parseable). Full schema
-and defaults in [`07-configuration.md`](07-configuration.md). Sketch:
+and defaults in [`configuration.md`](configuration.md). Sketch:
 
 ```markdown
 ---
@@ -259,7 +261,7 @@ consumed by `mnx-promote`. It lives **outside the graph** (per-author, never pus
 `~/.claude/mnemex/staging/<graph-slug>/atoms/<provisional-id>.md`, where the **provisional id** is a
 content hash: `stg-` + the first 12 hex of `sha1(type|summary|body|aliases|domain|trigger)`. It must
 **never** become a real node id or enter a read stamp; promotion mints a real slug id. Full model:
-[`11-staging-and-promotion.md`](11-staging-and-promotion.md).
+[`staging-and-promotion.md`](staging-and-promotion.md).
 
 ```markdown
 ---
@@ -270,7 +272,9 @@ aliases: [field 124, DE124]
 domain: [settlement]               # routing key(s)
 score: now                         # now | later  ('not-needed' is dropped, never staged)
 urgent: true                       # sharpens the nag; never inline-pushes
-volatility: default                # LLM-PROPOSED from content shape; human overrides at the promote gate (Doc 14)
+volatility: default                # LLM-PROPOSED from content shape; human overrides at the promote gate (Freshness & Revalidation)
+mentions:                          # GENERATED from the body's [[wiki-links]] at capture (Link Reconciliation); resolved_id
+  - { name: iso8583-field124, resolved_id: null, type: null }   #   ALWAYS null here — promote resolves.
 trigger: "reviewing a settlement spec"   # REQUIRED for type: pattern
 provenance:                        # self-sufficient to reconcile COLD (transcript gone by promote)
   artifact: tap-vic-settlement-spec
@@ -281,7 +285,9 @@ provenance:                        # self-sufficient to reconcile COLD (transcri
 staged_at: 2026-06-29T10:11:21Z
 ---
 
-The atom's knowledge body (kept under node_body_max_chars; split into atoms + an edge if larger).
+The atom's knowledge body. May contain inline [[wiki-links]] to other pages by NAME (Link Reconciliation) — capture
+hoists them into `mentions:` and preserves them verbatim; **promote** resolves them and splits an
+over-budget body into sibling pages + a link (capture never splits or resolves).
 ```
 
 ---

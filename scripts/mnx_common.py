@@ -3,7 +3,7 @@
 The single source of truth for time, parsing, and id rules. Every other Mnemex
 script imports from here; nothing else writes a timestamp or mints an id.
 
-Dependencies: Python 3.9+ stdlib + PyYAML only. See docs/06-script-contracts.md.
+Dependencies: Python 3.9+ stdlib + PyYAML only. See docs/script-contracts.md.
 """
 from __future__ import annotations
 
@@ -192,6 +192,39 @@ def aliases_from_index(cell: str) -> list[str]:
     return [a.strip() for a in (cell or "").split(";") if a.strip()]
 
 
+# --- wiki-links (Link Reconciliation) ----------------------------------------------------
+
+_WIKILINK_RE = re.compile(r"\[\[([^\[\]]+?)\]\]")
+
+
+def parse_wikilinks(body: str) -> list[dict[str, Any]]:
+    """Extract inline [[wiki-links]] from a node/atom body (Link Reconciliation, the mesh authoring surface).
+
+    Wiki-native: `[[name]]` is an untyped link; `[[name|Display]]` carries display text (the pipe
+    means DISPLAY, exactly like Obsidian/Wikipedia — NOT a relationship type). An optional link
+    `type` is a rare escape and lives in front-matter `mentions[].type`, never inline, so the body
+    stays pure wiki. Returns [{name, display?}] de-duplicated by normalized name, first occurrence
+    wins, source order preserved. Empty/whitespace targets are skipped.
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for m in _WIKILINK_RE.finditer(body or ""):
+        raw = m.group(1)
+        parts = [p.strip() for p in raw.split("|")]
+        name = parts[0]
+        if not name:
+            continue
+        key = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        entry: dict[str, Any] = {"name": name}
+        if len(parts) > 1 and parts[1]:
+            entry["display"] = parts[1]
+        out.append(entry)
+    return out
+
+
 # --- node / index parsing ---------------------------------------------------
 
 def parse_node(path: str | Path) -> dict[str, Any]:
@@ -203,6 +236,7 @@ def parse_node(path: str | Path) -> dict[str, Any]:
     node = dict(fm)
     node.setdefault("aliases", [])
     node.setdefault("edges", [])
+    node.setdefault("mentions", [])
     node.setdefault("references", [])
     node["_path"] = str(p)
     node["_body"] = body

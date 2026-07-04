@@ -1,4 +1,4 @@
-# 🎚️ 07 — Configuration
+# 🎚️ Configuration
 
 All tunables live in `mnemex.config.md` at the repo root — Markdown with a YAML front-matter block, so
 it is human-readable *and* machine-parseable. The protocol reads it via `mnx_config.py`. This document
@@ -29,7 +29,7 @@ cold_ttl_days: 120               # grace in cold before a node becomes a death c
 cold_recall_multiplier: 1.6       # spaced-repetition over-reward: reviving a COLD node boosts harder
 strength_max: 1.0                 # saturation cap (prevents immortal nodes)
 
-# --- Freshness (revalidation horizon; Doc 14) ---
+# --- Freshness (revalidation horizon; Freshness & Revalidation) ---
 freshness_ttl_days: 30            # a domain fact goes STALE this long after it was last VERIFIED.
                                   #   Asked at mnx-init like half_life_days. Independent of decay/tiers.
 freshness_pattern_bonus: 0.30    # patterns are more durable → longer horizon (derived, like the half-life bonus)
@@ -85,7 +85,7 @@ They are independent — a `hot` fact can be `stale`. You set **one** freshness 
 the per-atom horizon (`stale_after = verified + horizon`), in precedence order:
 
 ```
-volatility: timeless      → never stale (and never auto-dies — Doc 14 §7)
+volatility: timeless      → never stale (and never auto-dies — Freshness & Revalidation §7)
 volatility: volatile      → freshness_ttl_days · 0.15         (URLs, versions, prices, on-call names)
 volatility: <int days>    → exactly that many days
 volatility: default →  pattern:  freshness_ttl_days · (1 + freshness_pattern_bonus)
@@ -96,7 +96,7 @@ volatility: default →  pattern:  freshness_ttl_days · (1 + freshness_pattern_
 a `volatility` from the atom's content shape and the human confirms/overrides at the promote gate — the author
 never has to remember to annotate. At `mnx-init` the tool states the default explicitly, exactly as it does for
 the half-life: *"Facts go stale after 30 days unless you tag them; patterns get +30%."* Full model:
-[`14-freshness-and-revalidation.md`](14-freshness-and-revalidation.md).
+[`freshness-and-revalidation.md`](freshness-and-revalidation.md).
 
 ## 🛡️ Changing config safely (version + re-normalization)
 
@@ -130,7 +130,7 @@ overnight. The protocol guards this:
    (`score_new(now) == score_old(now)`), then stamps the new version/λ. The same pass recomputes every
    node's `stale_after` if `freshness_ttl_days`/`freshness_pattern_bonus` changed — so a freshness-horizon
    edit, like a half-life edit, takes effect gradually at the next consolidation rather than reinterpreting
-   the index in place (Doc 14 §8).
+   the index in place (Freshness & Revalidation §8).
 
 This makes parameter changes safe and gradual rather than abrupt and surprising.
 
@@ -156,4 +156,4 @@ None of these values are knowable up front. Recommended posture:
   `volatility: volatile` for anything that rots fast (endpoints, versions, prices).
 
 Every parameter is also collected in the reference table in
-[`09-appendix-glossary-acronyms.md`](09-appendix-glossary-acronyms.md).
+[`appendix-glossary-acronyms.md`](appendix-glossary-acronyms.md).
