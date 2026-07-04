@@ -13,9 +13,16 @@ Subcommands (argv[1]):
                        checks the marker and goes silent, effectively dropping Mnemex for the session.
                        Take no stdin; safe to run as a plain command.
   stop               : when the agent wraps up a turn, batch-flush this turn's pending usage stamps
-                       (mnx_stamp.flush; silent, advisory), then interrupt ONCE per session to have
-                       it ask whether durable knowledge should be staged with mnx-capture. Guarded
-                       against nag-loops (session marker + stop_hook_active); never auto-writes.
+                       (mnx_stamp.flush; silent, advisory), then interrupt ONCE per session (or once
+                       more per compaction — see pre-compact) to have it ask whether durable knowledge
+                       should be staged with mnx-capture. Guarded against nag-loops (session marker +
+                       stop_hook_active); never auto-writes.
+  pre-compact        : (PreCompact) fires right before the transcript is summarized — the one moment
+                       session detail is actually LOST. PreCompact cannot inject context or block, so
+                       it instead RE-ARMS the Stop capture nudge (clears the once-per-session marker and
+                       records that a compaction happened), so the very next Stop re-asks the agent to
+                       stage the delta from the window about to be compacted. Best-effort flush of
+                       pending stamps too. No-op when muted; never auto-writes.
   session-end        : flush any remaining usage stamps (safety net) and prompt to capture durable
                        knowledge with mnx-capture, and nag on staged-pending / consolidation-overdue
                        (advisory; never auto-writes, never auto-promotes).
@@ -122,6 +129,16 @@ def _safe_session(session_id: str) -> str:
 def _stop_marker(session_id: str) -> Path:
     """Per-session marker so the Stop nudge fires at most once, not on every turn."""
     return _run_dir() / f"stop-nudged-{_safe_session(session_id)}"
+
+
+def _compaction_marker(session_id: str) -> Path:
+    """Per-session marker set by PreCompact and consumed by the next Stop nudge.
+
+    Its presence tells Stop that its nudge follows a compaction (a real transcript-loss event),
+    so Stop can sharpen the reason to 'stage the delta from the window that was just summarized'
+    instead of the generic once-per-session prompt. Cleaned up at SessionEnd.
+    """
+    return _run_dir() / f"compaction-seen-{_safe_session(session_id)}"
 
 
 def _mute_marker(session_id: str) -> Path:
@@ -270,9 +287,10 @@ def stop() -> int:
     to ask the user whether durable knowledge should be staged with mnx-capture.
 
     Loop-safety is layered: `stop_hook_active` short-circuits the immediate continuation, and a
-    per-session marker prevents re-nudging on every subsequent turn. If the marker can't be
-    written we stay silent rather than risk repeated interruptions. If the session is muted
-    (the user declined Mnemex at session start), this is a no-op.
+    per-session marker prevents re-nudging on every subsequent turn. The nudge re-arms exactly once
+    per compaction (PreCompact clears the marker), so re-prompts are bounded by real transcript-loss
+    events, not a timer. If the marker can't be written we stay silent rather than risk repeated
+    interruptions. If the session is muted (the user declined Mnemex at session start), this is a no-op.
     """
     event = _read_event()
     sid = str(event.get("session_id", ""))
@@ -286,22 +304,67 @@ def stop() -> int:
         return 0  # no graph bound here — nothing to capture
     marker = _stop_marker(sid)
     if marker.exists():
-        return 0  # already nudged once this session
+        return 0  # already nudged this session (and no compaction has re-armed it since)
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("nudged", encoding="utf-8")
     except Exception:
         return 0  # cannot persist the marker -> don't block, to avoid a nag loop
-    print(json.dumps({
-        "decision": "block",
-        "reason": (
+    # Was this nudge re-armed by a compaction? If so, sharpen it to the delta that was just lost.
+    after_compaction = False
+    cmark = _compaction_marker(sid)
+    try:
+        after_compaction = cmark.exists()
+        cmark.unlink(missing_ok=True)  # consume it so we don't repeat this framing next turn
+    except Exception:
+        after_compaction = False
+    if after_compaction:
+        reason = (
+            "Mnemex: the conversation was just summarized — the detail in the compacted window is now "
+            "gone from your context. If that window produced durable knowledge or human-review "
+            "decisions, stage it now with /mnemex:mnx-capture before continuing. Capture is "
+            "incremental: it consults what is already staged and stages only the delta (re-capturing "
+            "identical content is a no-op), so run it freely at these checkpoints. Merging into the "
+            "graph stays the separate /mnemex:mnx-promote step. If nothing durable was produced in that "
+            "window, say so briefly and continue."
+        )
+    else:
+        reason = (
             "Mnemex one-time check before you finish: if this session produced durable knowledge, "
             "human-review decisions, or reusable context, ask the user whether to stage it with "
-            "/mnemex:mnx-capture before concluding (capture is cheap + local; merging into the graph "
-            "is the separate /mnemex:mnx-promote step). If nothing durable was produced, say so "
-            "briefly and stop. This reminder fires only once per session."
-        ),
-    }))
+            "/mnemex:mnx-capture before concluding (capture is cheap, local, and incremental — it "
+            "stages only the delta over what is already staged). Merging into the graph is the separate "
+            "/mnemex:mnx-promote step. If nothing durable was produced, say so briefly and stop. This "
+            "reminder fires once per session (and once more after any compaction)."
+        )
+    print(json.dumps({"decision": "block", "reason": reason}))
+    return 0
+
+
+def pre_compact() -> int:
+    """Right before the transcript is summarized, re-arm the Stop capture nudge for the lost window.
+
+    Compaction is the one moment session detail is actually destroyed — precisely when uncaptured
+    knowledge is at risk. PreCompact cannot inject context or block the compaction, so it does the
+    one durable thing it can: it clears the once-per-session Stop marker and records that a compaction
+    happened, so the very next Stop re-prompts the agent (with a delta-flavored reason) to stage what
+    the compacted window produced. Re-nudging is therefore bounded by real loss events, not a timer.
+    Best-effort flush of pending usage stamps too. No-op when muted; never auto-writes.
+    """
+    event = _read_event()
+    sid = str(event.get("session_id", ""))
+    if _is_muted(sid):
+        return 0  # user declined Mnemex this session — no re-arm, no flush
+    binding = mnx_binding.resolve()
+    if binding is None:
+        return 0  # no graph bound here — nothing to capture
+    _flush_usage_stamps()  # safety: batch out any stamps this turn's Stop hasn't flushed yet
+    try:  # re-arm the Stop nudge: drop the once-per-session marker, mark the loss event
+        _compaction_marker(sid).parent.mkdir(parents=True, exist_ok=True)
+        _stop_marker(sid).unlink(missing_ok=True)
+        _compaction_marker(sid).write_text("compacted", encoding="utf-8")
+    except Exception:
+        return 0  # can't persist markers -> stay silent rather than misbehave
     return 0
 
 
@@ -314,7 +377,7 @@ def session_end() -> int:
     event = _read_event()
     sid = str(event.get("session_id", ""))
     muted = _is_muted(sid)
-    for marker in (_stop_marker(sid), _mute_marker(sid)):
+    for marker in (_stop_marker(sid), _mute_marker(sid), _compaction_marker(sid)):
         try:  # tidy per-session markers so the next session re-asks consent / re-nudges
             marker.unlink(missing_ok=True)
         except Exception:
@@ -483,6 +546,8 @@ def main(argv: list[str]) -> int:
             return session_start()
         if cmd == "stop":
             return stop()
+        if cmd == "pre-compact":
+            return pre_compact()
         if cmd == "session-end":
             return session_end()
         if cmd == "pre-commit-gate":

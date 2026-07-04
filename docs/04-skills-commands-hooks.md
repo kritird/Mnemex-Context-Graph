@@ -88,9 +88,18 @@ review/clarification points from context (those are where the *how* lives and ex
 conversation). Capture is the **local `git commit` half**: it stages atoms and **never touches the
 graph** — no reconcile, no lock, no push. Full model: [`11-staging-and-promotion.md`](11-staging-and-promotion.md).
 
+Run it **incrementally at checkpoints**, not only at the end: because the transcript shrinks at every
+compaction, one end-of-session dump is the most loss-exposed way to capture. Capture consults what is
+already staged (Phase 0b) and stages only the delta — re-staging identical content is an idempotent
+no-op (content-hash id) — so capturing the newest keypoints whenever a sub-task lands, a review settles,
+or a compaction is imminent (see the **PreCompact** hook below) is cheap and safe.
+
 1. **Preflight + budget pre-check.** Resolve the binding (note `staging_root`). `mnx_stage.py status` —
    `hard` budget ⇒ stop (backpressure: run promote); `soft` ⇒ warn.
-2. **Extract.** Decompose artifact + transcript into candidate atoms; tag `domain` or `pattern`; mine
+1b. **Delta ledger.** `mnx_stage.py list` — read the already-staged atoms (`id · type · score · summary ·
+   age`) as the record of keypoints captured this session, so extraction targets only the delta.
+2. **Extract the delta.** Decompose artifact + transcript into candidate atoms **not already staged**;
+   tag `domain` or `pattern`; mine
    review corrections/rejected alternatives into patterns with a `trigger`. Honor the node-size budget
    (split oversized atoms + an edge; never truncate). **Propose `volatility`** from the atom's content shape
    — a body that is a URL / version / price / on-call name ⇒ `volatile`; a definition / invariant ⇒
@@ -226,9 +235,11 @@ sequenceDiagram
     H->>A: consent primer — "use Mnemex this session?"
     U->>A: yes / no (no → opt-out mutes session)
     A->>G: 🔍 mnx-read before domain tasks
+    Note over H: 🗜️ PreCompact (transcript about to be summarized)
+    H->>H: re-arm the capture nudge · flush stamps
     Note over H: ⏹️ Stop (turn ends)
-    H->>A: flush stamps · ask "stage with mnx-capture?"
-    A->>G: ✍️ mnx-capture (local staging)
+    H->>A: flush stamps · ask "stage the delta with mnx-capture?"
+    A->>G: ✍️ mnx-capture (local staging, incremental)
     Note over H: 🔚 SessionEnd
     H->>G: flush pending stamps · clear session markers
     Note over H: 🛡️ PreToolUse(git commit in graph) → doctor gate (deny on error)
@@ -237,7 +248,8 @@ sequenceDiagram
 | Hook event | Purpose | Why a hook, not a skill |
 |---|---|---|
 | **SessionStart** *(implemented)* | Resolve the binding and **sync the graph** (blocking — clone/resync a remote, verify a local folder), then inject a **consent primer**: the sync status plus an instruction to ask the user ONCE, up front, whether to use Mnemex this session — if yes, `mnx-read` before domain tasks and `mnx-capture` to stage knowledge; if no, run `opt-out` (the command is handed over with this session's id baked in) so Mnemex goes silent for the session. Also emits **nag-only** lines for staged-pending / consolidation-overdue (never auto-runs). If no graph is bound, emit a **one-time onboarding notice** (fires once ever) pointing at `/mnemex:mnx-init`. Silent if the session is already muted. | Sync must be guaranteed before any skill runs; asking once at turn zero sets read context on consent and lets the user drop Mnemex for the session in one move, instead of being nudged every turn. |
-| **Stop** *(implemented)* | When the agent wraps up a turn, batch-flush this turn's usage stamps, then **block once per session** with a reason that has it ask the user whether durable knowledge should be staged with `/mnemex:mnx-capture`. Loop-safe (a per-session marker plus `stop_hook_active` prevent re-nudging); **no-op when the session is muted**; never auto-writes. | Fires while the session is still live, so unlike SessionEnd it can hand the agent a turn to actually ask the user. |
+| **Stop** *(implemented)* | When the agent wraps up a turn, batch-flush this turn's usage stamps, then **block once per session** (and **once more after each compaction** — see PreCompact) with a reason that has it ask the user whether durable knowledge should be staged with `/mnemex:mnx-capture`. Loop-safe (a per-session marker plus `stop_hook_active` prevent re-nudging); the reason sharpens to "stage the delta from the window that was just summarized" when a compaction re-armed it; **no-op when the session is muted**; never auto-writes. | Fires while the session is still live, so unlike SessionEnd it can hand the agent a turn to actually ask the user. |
+| **PreCompact** *(implemented)* | Fires right before the transcript is summarized — the one moment session detail is actually **lost**. PreCompact cannot inject context or block, so it **re-arms the Stop capture nudge** (clears the once-per-session marker and records the compaction) so the next Stop re-asks the agent to stage the **delta** from the compacted window, and best-effort flushes pending stamps. **No-op when muted**; never auto-writes. | Ties re-nudging to a real transcript-loss event rather than a timer; guaranteed to fire exactly at the moment uncaptured knowledge is at risk, which a skill would miss. |
 | **SessionEnd** *(implemented)* | Flush any pending usage stamps, then **prompt** to stage durable knowledge with `/mnemex:mnx-capture` and emit staged-pending / consolidation-overdue nags (advisory; never auto-writes, never auto-promotes). Tidies the session's stop-nudge and mute markers so the next session re-asks consent. **No-op when muted.** | A reliable end-of-session nudge the model might otherwise skip, plus per-session marker cleanup. |
 | **PreToolUse** (Bash) *(implemented)* | If the pending command is a `git commit` **inside the bound graph repo**, run `mnx_doctor.check` and **deny** the commit on error-level findings, so a structurally broken graph cannot be committed. Scoped to the graph repo only — a commit in the author's project repo is never touched — and **fails open** on any internal error. | A skill can be skipped; a gate must be deterministic. |
 | **PostToolUse** (Bash) *(implemented)* | After a Mnemex mutation command (matched on `mnx_`/`mnemex` in the command), surface a stranded `pass.plan.json` / unreleased team lock — a crashed `gc`/`write` — with the recommended recovery (rollback vs. replay). Advisory; never blocks. | Cleanup must run regardless of model attention. |
@@ -250,8 +262,8 @@ repo, and PostToolUse only scans when the command references Mnemex — so neith
 Note: the primary read trigger remains the agent invoking `mnx-read` (by skill description or the
 SessionStart consent primer) or an author composing it into their own skill — no hook auto-runs a skill.
 Consent is captured once at session start: on **yes** the agent reads/writes as needed; on **no** it runs
-`mnx_hooks.py opt-out --session <id>`, which sets a per-session mute marker that SessionStart, Stop, and
-SessionEnd all honor — effectively dropping Mnemex for the session without unregistering the skills (the
+`mnx_hooks.py opt-out --session <id>`, which sets a per-session mute marker that SessionStart, Stop,
+PreCompact, and SessionEnd all honor — effectively dropping Mnemex for the session without unregistering the skills (the
 user can still invoke `/mnemex:*` explicitly, or `opt-in` to re-enable). The marker is cleared at
 SessionEnd, so the next session asks again.
 
