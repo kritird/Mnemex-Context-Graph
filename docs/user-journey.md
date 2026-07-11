@@ -41,7 +41,7 @@ journey
 
 ```mermaid
 flowchart LR
-    A[💻 pip install pyyaml] --> B[🧩 /plugin marketplace add<br/>kritird/Mnemex-Context-Graph]
+    A[💻 pip install pyyaml] --> B[🧩 /plugin marketplace add<br/>kritird/OpenMnemex]
     B --> C[⬇️ /plugin install<br/>mnemex@mnemex-marketplace]
     C --> D[✅ skills + commands + hooks<br/>registered in Claude Code]
     classDef step fill:#14507a,stroke:#39c,color:#fff;
@@ -55,7 +55,7 @@ flowchart LR
 pip install pyyaml
 
 # 2. Add the marketplace and install the plugin inside Claude Code:
-/plugin marketplace add kritird/Mnemex-Context-Graph
+/plugin marketplace add kritird/OpenMnemex
 /plugin install mnemex@mnemex-marketplace
 ```
 

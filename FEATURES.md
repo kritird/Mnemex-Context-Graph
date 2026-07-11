@@ -314,7 +314,7 @@ Plus the on-demand health tools:
 
 ```bash
 pip install pyyaml
-/plugin marketplace add kritird/Mnemex-Context-Graph
+/plugin marketplace add kritird/OpenMnemex
 /plugin install mnemex@mnemex-marketplace
 /mnemex:mnx-init
 ```

@@ -1,10 +1,10 @@
 ```
-███╗   ███╗  ███╗   ██╗  ███████╗  ███╗   ███╗  ███████╗  ██╗  ██╗
-████╗ ████║  ████╗  ██║  ██╔════╝  ████╗ ████║  ██╔════╝  ╚██╗██╔╝
-██╔████╔██║  ██╔██╗ ██║  █████╗    ██╔████╔██║  █████╗     ╚███╔╝ 
-██║╚██╔╝██║  ██║╚██╗██║  ██╔══╝    ██║╚██╔╝██║  ██╔══╝     ██╔██╗ 
-██║ ╚═╝ ██║  ██║ ╚████║  ███████╗  ██║ ╚═╝ ██║  ███████╗  ██╔╝ ██╗
-╚═╝     ╚═╝  ╚═╝  ╚═══╝  ╚══════╝  ╚═╝     ╚═╝  ╚══════╝  ╚═╝  ╚═╝
+ ██████╗   ██████╗   ███████╗  ███╗   ██╗  ███╗   ███╗  ███╗   ██╗  ███████╗  ███╗   ███╗  ███████╗  ██╗  ██╗
+██╔═══██╗  ██╔══██╗  ██╔════╝  ████╗  ██║  ████╗ ████║  ████╗  ██║  ██╔════╝  ████╗ ████║  ██╔════╝  ╚██╗██╔╝
+██║   ██║  ██████╔╝  █████╗    ██╔██╗ ██║  ██╔████╔██║  ██╔██╗ ██║  █████╗    ██╔████╔██║  █████╗     ╚███╔╝ 
+██║   ██║  ██╔═══╝   ██╔══╝    ██║╚██╗██║  ██║╚██╔╝██║  ██║╚██╗██║  ██╔══╝    ██║╚██╔╝██║  ██╔══╝     ██╔██╗ 
+╚██████╔╝  ██║       ███████╗  ██║ ╚████║  ██║ ╚═╝ ██║  ██║ ╚████║  ███████╗  ██║ ╚═╝ ██║  ███████╗  ██╔╝ ██╗
+ ╚═════╝   ╚═╝       ╚══════╝  ╚═╝  ╚═══╝  ╚═╝     ╚═╝  ╚═╝  ╚═══╝  ╚══════╝  ╚═╝     ╚═╝  ╚══════╝  ╚═╝  ╚═╝
 ```
 
 <p align="center"><b>Auto-memory for LLM agents — it decides what mattered and keeps it, so you don't have to. A self-pruning, human-memory-modeled knowledge context graph.</b></p>
@@ -285,7 +285,7 @@ Phase-by-phase breakdowns are in
 pip install pyyaml
 
 # 2. In Claude Code, add this repo as a marketplace, then install the plugin:
-/plugin marketplace add kritird/Mnemex-Context-Graph
+/plugin marketplace add kritird/OpenMnemex
 /plugin install mnemex@mnemex-marketplace
 
 # 3. Scaffold or bind a knowledge repo (the binding step every other command resolves):
