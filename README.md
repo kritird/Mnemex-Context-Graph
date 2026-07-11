@@ -219,6 +219,36 @@ Knowledge writing is split **capture / promote** — the `git commit` vs `git pu
 The maintenance pass (`mnx-consolidate`) is **internal** — the back half of `mnx-promote`, with no
 standalone slash command.
 
+### 🏗️ Bootstrap a whole graph from an existing repo — in one command
+
+**You don't start from an empty graph.** Point Mnemex at a repo you already have and it builds the memory
+for you:
+
+```bash
+/mnemex:mnx-ingest github.com/acme/payments-service     # or a local path
+```
+
+`mnx-ingest` reads an entire **code or documentation repository** — no live session needed — and turns years
+of accumulated docs, ADRs, API contracts, and code comments into a live, connected knowledge graph. It does
+**not** dump the repo into a vector store. It **distills**: an LLM mines each file for the durable *facts*
+and *decisions* worth keeping, **collapses the same fact stated five different ways into one well-sourced
+node** (entity resolution), and wires the `[[wiki-links]]` between them — so what lands is *distilled
+memory*, not a RAG index over your source.
+
+And it stays honest at scale:
+
+- **Two gates, not a thousand.** Approve the scope + routing map once up front, then a single bulk summary at
+  the end — **never** per-atom review. A monorepo is one decision, not ten thousand.
+- **Re-runnable and idempotent.** Run it again after the repo changes and it imports **only the diff**; a
+  deleted source file surfaces as an *orphan candidate* for you to judge — never silent auto-death.
+- **Safe by construction.** Ingest **only stages** (promote stays the sole writer), **never reads secrets**,
+  and **never mutates the source**.
+- **Higher recall for free.** A shared **gleaning** pass ("what did I miss?") lifts extraction completeness —
+  and it improves ordinary session capture too.
+
+Everything downstream — reconcile, merge, the wiki mesh, consolidate, doctor, push — is the **same pipeline**
+your daily captures already flow through. Full model: [`docs/corpus-ingestion.md`](docs/corpus-ingestion.md).
+
 ```mermaid
 flowchart LR
     R[🔍 mnx-read<br/><i>recall</i>] -.->|append stamps| REG[(📝 registry)]
@@ -292,6 +322,8 @@ is expanded on first use and collected in the appendix.
 | [`appendix-glossary-acronyms.md`](docs/appendix-glossary-acronyms.md) | Glossary, acronym expansions, parameter reference, FAQ, references. |
 | [`binding-and-graph-sync.md`](docs/binding-and-graph-sync.md) | How an author in any repo binds to a separate knowledge-graph repo. |
 | [`staging-and-promotion.md`](docs/staging-and-promotion.md) | The **capture / promote** split: staging tier, atom schema, budgets, read overlay, atomic promote. |
+| [`link-reconciliation.md`](docs/link-reconciliation.md) | 🕸️ The wiki mesh (Step 2b): inline `[[wiki-links]]`, phonebook resolution, red-links + backfill. |
+| [`corpus-ingestion.md`](docs/corpus-ingestion.md) | 🏗️ **Bootstrapping the graph from an existing repo**: `mnx-ingest` as a source adapter — walk → distill → wikify → bulk promote; gleaning + entity resolution. |
 | [`user-journey.md`](docs/user-journey.md) | 🧭 End-to-end journey: install → bind → daily read/capture/promote, with auto-hook touchpoints. |
 | [`multi-graph-and-team-routing.md`](docs/multi-graph-and-team-routing.md) | 🔗 Working across many graphs, teams & orgs: which-graph vs which-team, per-graph staging, worked example. |
 | [`freshness-and-revalidation.md`](docs/freshness-and-revalidation.md) | ⏳ The **freshness** axis: `verified` clock, `stale_after`, read-time refresh cue, `volatility`, timeless-never-dies. |

@@ -293,3 +293,24 @@ invoke the scripts via `${CLAUDE_PLUGIN_ROOT}`, and the merge-driver registrar r
 **Why this matters:** the plugin can be reinstalled, upgraded, moved, or run from a read-only install
 with no loss of state and no dirty tree in its own checkout. State portability and plugin immutability are
 the same guarantee.
+
+---
+
+## 1️⃣3️⃣ Corpus ingestion — bootstrap a graph from a whole repo (a source adapter, not a subsystem)
+
+Mnemex can build a graph from an existing **code or documentation repository** in one command
+([`corpus-ingestion.md`](corpus-ingestion.md)) — turning a monorepo's worth of docs, ADRs, API contracts,
+and code comments into a live, connected graph without a single interactive session. The architecturally
+important part is **how little new machinery this takes**: a live session is one producer of staged atoms;
+a **corpus** is a second, and both converge on the same backbone.
+
+`mnx-ingest` adds only a deterministic *front-end* — walk → classify → chunk → distill → wikify → stage a
+labeled bulk batch — plus a scale-adapted `mnx-promote --bulk` and a delta manifest. Everything downstream
+(reconcile, MERGE/SUPERSEDE, contradiction HITL, the wiki mesh, consolidate, doctor, push) is the
+**existing** pipeline, reused unchanged, and `mnx-promote` stays the sole writer. The two hard problems a
+cold corpus adds — **scale** (two gates, never per-atom review) and **redundancy** (the same fact stated
+five ways) — are absorbed by an **ingest-scoped** GraphRAG-derived layer: entity resolution collapses each
+entity to one well-sourced node, a two-pass catalog keeps the `[[links]]` globally consistent, and optional
+Leiden may only *propose* a folder map at gate #1. Episodic capture needs none of that (it mines a lived
+transcript), so the one shared technique is *gleaning*. The whole feature holds the line: **no vectors, no
+server, no global index, no read-time clustering** — a distilled graph, not a RAG index over your source.

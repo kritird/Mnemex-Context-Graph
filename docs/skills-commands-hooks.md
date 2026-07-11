@@ -135,6 +135,38 @@ any contradiction is a **hard HITL block** (resolve in-cycle or abort). The orde
 5. **Apply** serially under the lock; run `mnx-doctor` (must pass); **persist** (commit + push by kind);
    **clear staging** only on a confirmed persist (abort leaves staging untouched).
 
+**`--bulk [--ingest-batch <id>]`** is the volume-adapted variant that [`mnx-ingest`](#3️⃣🅱️-mnx-ingest--bootstrap-the-graph-from-an-existing-repo) hands off to: forked per-cluster reconcile, a per-cluster-count plan that
+auto-accepts plain CREATE/MERGE and stops only on exceptions (gate #2), incremental consolidate over a
+frozen view, and an ingest-manifest write on persist. It drains only the labeled batch, never a user's
+hand-captures. See [`staging-and-promotion.md`](staging-and-promotion.md) and [`corpus-ingestion.md`](corpus-ingestion.md).
+
+---
+
+## 3️⃣🅱️ `mnx-ingest` — bootstrap the graph from an existing repo
+
+**Command:** `/mnemex:mnx-ingest <local-path|git-url> [--into <graph>] [--dry-run] [--resume <ingest-batch>]`
+
+A **source adapter**, not a new subsystem: a corpus (code/docs) is a second producer of staged atoms
+alongside a live session. It walks the source, **distills** durable atoms (never transcribes — zero atoms
+from a file is valid), discovers a deduped entity catalog, wikifies `[[links]]`, and stages a **labeled
+bulk batch** — then `mnx-promote --bulk` merges it. **Two gates only:** gate #1 approves scope + the
+source-tree→cluster map up front; gate #2 is the bulk-promote summary. No per-atom review. The flow:
+
+1. **Acquire** (local in place / remote → shallow clone to a read-only cache) + **probe** (walk · classify
+   `doc|interface|code-doc|config|skip` · chunk along structure · hash) → scope estimate; on re-ingest,
+   **delta** against the manifest so only added/changed files are extracted.
+2. **Gate #1** — scope counts + the editable source-tree→cluster map (`--dry-run` stops here).
+3. **Pass 1** — distil kind-aware atoms (code **value-gate**: public/documented/config-only), run the
+   bounded **glean** loop (`mnx_glean` checklist mode) over the unit set, then **entity-resolve**
+   (`mnx_er`) → CREATE/MERGE/COLLAPSE + a `possible` HITL band (one entity → one node).
+4. **Pass 2** — wikify each atom against the catalog ∪ phonebook (exact → live link, fuzzy → `⚠ suggested`,
+   unmatched → red-link) and **stage** under the bulk label with source-anchored provenance.
+5. **Drain** via `mnx-promote --bulk`; **report** created/merged/superseded/dropped-dup/held + orphan candidates.
+
+Ingest **never writes the graph** (staging only; promote is the sole writer), **never mutates the source**,
+**never reads secrets**, and is **idempotent** on re-run (a deleted source file is an *orphan candidate*,
+never auto-death). Full model: [`corpus-ingestion.md`](corpus-ingestion.md).
+
 ---
 
 ## 3️⃣🅰️ `mnx-consolidate` — the maintenance pass (INTERNAL; promote's back half)

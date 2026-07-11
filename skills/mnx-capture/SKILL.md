@@ -102,6 +102,29 @@ truncate. **Splitting an over-budget note into sibling pages + a link is promote
 (promote is graph-aware; capture is local and dumb). Cap the number of atoms per session to what the
 session actually produced; do not pad.
 
+## Phase 1b — Glean (one bounded "what did I miss?" re-scan)
+Pass 1 (Phase 1) is your first extraction pass; a single pass reliably **under-captures the *how*** — the
+review-point patterns are the easiest to miss. So run **one** bounded recall pass (this is the shared
+*gleanings* technique, guardrail mode):
+
+- Re-read the transcript once and ask specifically: *"what durable fact — **especially a review-point
+  pattern** (a correction, a rejected alternative, a 'gotcha') — did I not stage yet?"*, guided by the
+  Phase-0b delta ledger so you look only at ground you have **not** already covered.
+- Any new candidate still passes the Phase-2 `now/later/not-needed` scoring gate and Phase-3 staging;
+  re-staging identical content stays an idempotent no-op (content-hash id), so this pass can only add.
+- **Bound the loop deterministically.** After the pass, count staged atoms before vs after and check
+  whether to stop:
+
+  ```
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_glean.py" step --before <n_before> --after <n_after> --pass 1
+  ```
+
+  `stop:true` (`reason: no-progress` = the pass added nothing new, or `reason: cap` = the pass budget
+  `max_glean_passes` is reached — default **2**, from user config) → stop gleaning and go to Phase 2/4.
+  Only if `stop:false` do you run one more pass (`--pass 2`). This is **not** a per-topic walk — it is at
+  most a couple of bounded re-scans, keeping capture cheap/fast (the design goal). Episodic capture does
+  **not** build a coverage checklist — that (checklist mode) is ingest-only.
+
 ## Phase 2 — Score each atom (`now | later | not-needed`)
 A momentary judgement of **intrinsic importance — NOT novelty**. Drift between sessions is fine; there
 is no rigid rubric. Novelty/dedup is decided later at promote (reconcile may drop an atom as a

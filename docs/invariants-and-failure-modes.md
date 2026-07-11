@@ -115,6 +115,26 @@ Each entry: the break, its mitigation, and the doc that owns the fix.
 | F17 | **Stale-but-trusted (truth decay)** — a frequently-read fact stays hot forever while its content silently goes out of date; heat *masks* staleness, so the model confidently serves outdated knowledge. | **Freshness axis**: a separate `verified` clock + precomputed `stale_after`; `mnx-read` emits a **refresh cue** on any stale atom (independent of heat); re-confirmation advances `verified` via a weight-0 `revalidated` stamp. | Freshness & Revalidation, Skills, Commands & Hooks |
 | F18 | **Foundational-fact death** — an eternal truth (definition/invariant) decays in heat from disuse and gets tombstoned by the cold-TTL gate. | **`volatility: timeless`** pins the node against automatic death (exempt from the conjunction gate); it can leave only by explicit SUPERSEDE. | Freshness & Revalidation §7, Maintenance Pass Algorithm |
 
+### 🏗️ Ingest invariants (corpus bootstrap — DP1–DP8)
+
+Bootstrapping the graph from an existing repo ([`corpus-ingestion.md`](corpus-ingestion.md)) inherits every
+invariant above and adds its own load-bearing set. Each is defended by a test named in the build plan.
+
+| DP | Invariant | Why it holds |
+|---|---|---|
+| DP1 | **Single writer** — ingest never writes the graph; it only stages. | `mnx-ingest` stages only; `mnx-promote --bulk` is the sole writer (e2e asserts zero graph writes during ingest). |
+| DP2 | **Distill, never transcribe** — no file body copied wholesale; zero atoms from a file is valid. | Extraction is LLM judgment gated by the code value-gate; the deterministic walk only chunks + hashes. |
+| DP3 | **Read-only source** — a remote is cloned to a read-only cache, a local path read in place; secrets are never read. | `mnx_ingest` never mutates the source; the secret guard counts but never opens `.env`/`*.pem`/`*_rsa`/`credentials*`. |
+| DP4 | **Idempotent re-ingest** — a re-run never blindly re-creates; a deleted file never auto-tombstones. | manifest delta → content-hash idempotency → ER/reconcile dedup; a deleted file surfaces as an **orphan candidate** (human decides). |
+| DP5 | **One entity → one node** — intra-batch duplicates collapse *before* staging. | `mnx_er` clusters + COLLAPSEs; redundancy becomes provenance + unioned aliases, never duplicate nodes. |
+| DP6 | **Exact resolves, fuzzy proposes** — an exact catalog/phonebook match links deterministically; a fuzzy association is `⚠ suggested`. | A wrong link is a false edge; the ER `possible` band + simindex near-matches are HITL at gate #2, never auto-written. |
+| DP7 | **No structure from global clustering** — community detection may only *propose* a folder map at gate #1. | Path-based routing is the default; Leiden never mints structure and never runs at read time (guards S2). |
+| DP8 | **Bulk isolation** — ingest atoms are label-partitioned from hand-captures. | The `ingest_batch` label + its own bulk cap; `clear --ingest-batch` drains only that batch, never session atoms. |
+
+**Orphan-candidate flow.** A source file deleted since the last ingest is *not* a death signal: the manifest
+delta surfaces its `node_ids` as orphan candidates in the report, and the human decides (SUPERSEDE, keep, or
+tombstone). Deletion of a doc ≠ death of the knowledge.
+
 ### 🌫️ Soft (documented limits, not defects)
 
 | # | Limit | Why it can't be fully hardened | Containment |

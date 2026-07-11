@@ -31,6 +31,15 @@ reconcile_cold_on: update         # always | update | never
 
 # --- Death policy ---
 purge_dead: false                 # false = tombstone-and-retain (recommended)
+
+# --- Ingestion (bootstrapping the graph from an existing repo; docs/corpus-ingestion.md) ---
+ingest_bulk_soft_atoms: 500       # a bulk batch past this warns (drained continuously by --bulk promote)
+ingest_bulk_hard_atoms: 5000      # a bulk batch refuses past this (drain it first)
+ingest_max_atoms_per_run: 2000    # per-run cost ceiling; excess resumes on the next run
+er_match_threshold: 0.85          # entity-resolution: ≥ this score → same entity (deterministic merge)
+er_possible_threshold: 0.60       # [possible, match) → the HITL "⚠ suggested" band (LLM judge)
+code_extract: gated               # gated | deep | off — code value-gate (public/documented/config-only)
+# max_glean_passes lives in USER config (~/.claude/mnemex/config.md; default 2) — glean is shared with capture.
 ---
 
 # Mnemex configuration

@@ -4,8 +4,40 @@
 
 ## 🔤 A. Glossary
 
+**Bulk promote** — the volume-adapted `mnx-promote --bulk` that drains a corpus *ingest batch*: forked
+per-cluster reconcile, a summarized (per-cluster-count) plan that surfaces only exceptions, and
+incremental consolidate over a frozen view. Same single-writer / lock / doctor gate as episodic promote.
+
 **Cluster** — a leaf folder that directly contains node files (e.g. `team-payments/settlement/`). The
 unit of locking, compaction, and budget.
+
+**Corpus** — an existing code or documentation repository (local folder or git remote) that *ingest*
+distills into the graph. A second source of staged atoms alongside a live session.
+
+**Entity resolution (ER)** — the Fellegi-Sunter *block → score → cluster → dispose* stage that collapses a
+corpus's redundancy into one node per entity (CREATE / MERGE / COLLAPSE), with a `possible` HITL band. A
+pure proposer (`mnx_er.py`); it writes nothing.
+
+**Gleaning** — a bounded, source-agnostic "what did I miss?" recall pass (from GraphRAG) that lifts
+extraction completeness. Shared by episodic capture (guardrail mode) and ingest (checklist mode);
+bounded by `max_glean_passes` (default 2). The judgment stays in the LLM; `mnx_glean.py` only bounds it.
+
+**Ingest** — bootstrapping/updating the graph from an existing *corpus* without a live session
+(`mnx-ingest`): walk → distill → wikify → stage a labeled *ingest batch* → `mnx-promote --bulk`. A source
+adapter in front of the existing pipeline, not a new subsystem.
+
+**Ingest batch** — the labeled group of atoms staged by one ingest run (`ingest_batch: ing-<date>-<id>`,
+`bulk: true`); label-partitioned from hand-captures so an import never entangles a user's episodic captures.
+
+**Orphan candidate** — a source file *deleted* since the last ingest, surfaced by the manifest delta with
+its node_ids for a human decision. Deletion of a doc ≠ death of the knowledge — never auto-tombstoned.
+
+**Source-tree → cluster map** — the small subtree→cluster routing map ingest proposes at gate #1 (the bulk
+analog of per-atom `domain:`); the human approves/edits it once and atoms inherit the placement.
+
+**Wikification** — the entity-linking step that reconstructs the entity set from a cold corpus and emits
+`[[wiki-links]]` by name into atom bodies (mention detection → candidate generation → disambiguation),
+feeding the existing mesh (Step 2b) unchanged.
 
 **Cold tier** — the lowest active memory tier; nodes reachable only by deep search or by an edge from a
 live node; subject to TTL death.

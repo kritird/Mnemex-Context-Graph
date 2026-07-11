@@ -63,6 +63,19 @@ reconcile_cold_on: update         # always | update | never — lazy cold reconc
 # --- Death policy ---
 purge_dead: false                 # false = tombstone-and-retain (default, audit-friendly).
                                   # true  = hard-delete from working tree (git history still retains).
+
+# --- Ingestion (bootstrapping the graph from an existing repo; corpus-ingestion.md) ---
+ingest_bulk_soft_atoms: 500       # a bulk (labeled ingest) batch past this WARNS — drained continuously
+                                  #   by --bulk promote; it never trips the per-session capture nag (DP8).
+ingest_bulk_hard_atoms: 5000      # a bulk batch REFUSES past this — drain it with mnx-promote --bulk first.
+ingest_max_atoms_per_run: 2000    # per-run cost ceiling; excess resumes on the next run (--resume).
+er_match_threshold: 0.85          # entity-resolution: score ≥ this → same entity (deterministic merge).
+er_possible_threshold: 0.60       # [possible, match) → the HITL "⚠ suggested" band (the LLM judge runs
+                                  #   ONLY here; below possible → distinct). Fixed-with-override is v1.
+code_extract: gated               # gated | deep | off — the code value-gate: gated stages only public /
+                                  #   documented / config-only symbols (per-subtree overridable at gate #1).
+# max_glean_passes: 2             # in USER config (~/.claude/mnemex/config.md), not here — the glean
+                                  #   recall loop is shared with episodic capture. Bounds passes; default 2.
 ```
 
 ---

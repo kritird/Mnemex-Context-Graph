@@ -71,7 +71,14 @@ STAGING_DEFAULTS: dict[str, Any] = {
     "staging_hard_age_days": 21,
     "staging_hard_bytes": 512 * 1024,
     "held_max_age_days": 14,   # a contradiction lingering past this nags (W9 held-queue bound)
+    # Bulk profile (corpus ingest): a large cap meant to be DRAINED continuously by --bulk promote.
+    # Labeled (ingest_batch) atoms are counted separately and never trip the per-session nag (DP8).
+    "ingest_bulk_soft_atoms": 500,
+    "ingest_bulk_hard_atoms": 5000,
 }
+
+# Corpus-provenance fields threaded onto an ingest-staged atom (docs/corpus-ingestion.md §3).
+_CORPUS_PROV_KEYS = ("source_repo", "commit_sha", "source_path", "anchor", "kind", "ingest_batch")
 
 
 # --- location ----------------------------------------------------------------
@@ -161,6 +168,17 @@ def _normalize(atom: dict[str, Any]) -> dict[str, Any]:
     }
     if atype == "pattern":
         out["trigger"] = (atom.get("trigger") or "").strip()
+    # Corpus provenance (ingest): thread the source-anchored fields through so a corpus atom is
+    # promotable COLD. Accept them from provenance or the atom top level.
+    batch = atom.get("ingest_batch") or prov.get("ingest_batch")
+    for key in _CORPUS_PROV_KEYS:
+        val = prov.get(key) if prov.get(key) is not None else atom.get(key)
+        if val:
+            out["provenance"][key] = val
+    if batch:
+        out["ingest_batch"] = str(batch)     # top-level label (partitions bulk from session atoms)
+        out["bulk"] = True                   # DP8 isolation flag
+        out["provenance"]["ingest_batch"] = str(batch)
     out["mentions"] = _hoist_mentions(out["body"], atom.get("mentions"))
     return out
 
@@ -202,6 +220,9 @@ def _serialize(atom: dict[str, Any], pid: str, staged_at: str) -> str:
     }
     if atom["type"] == "pattern":
         fm["trigger"] = atom["trigger"]
+    if atom.get("ingest_batch"):
+        fm["ingest_batch"] = atom["ingest_batch"]
+        fm["bulk"] = True
     if atom.get("mentions"):
         fm["mentions"] = atom["mentions"]
     block = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).strip()
@@ -269,16 +290,26 @@ def status(binding=None) -> dict[str, Any]:
     now = mnx_common.now_utc()
     count = len(atoms)
     total_bytes = sum(int(a.get("_bytes", 0)) for a in atoms)
-    oldest = _oldest_age_days(atoms, now)
     urgent = sum(1 for a in atoms if a.get("urgent"))
-    verdict = _verdict(count, oldest, total_bytes, cfg)
+    # Label partition (DP8): the per-session budget is computed over SESSION atoms only, so an
+    # in-flight bulk import never trips the episodic soft/hard nag. Bulk batches carry their own cap.
+    session = [a for a in atoms if not a.get("ingest_batch")]
+    by_label: dict[str, int] = {"_session": len(session)}
+    for a in atoms:
+        b = a.get("ingest_batch")
+        if b:
+            by_label[str(b)] = by_label.get(str(b), 0) + 1
+    session_bytes = sum(int(a.get("_bytes", 0)) for a in session)
+    verdict = _verdict(len(session), _oldest_age_days(session, now), session_bytes, cfg)
     return {
         "staging_root": binding.staging_root(),
         "count": count,
+        "session_count": len(session),
         "urgent": urgent,
-        "oldest_age_days": round(oldest, 2),
+        "oldest_age_days": round(_oldest_age_days(session, now), 2),
         "total_bytes": total_bytes,
         "budget": verdict,
+        "by_label": by_label,
         "held": held_status(binding),
         "thresholds": {k: cfg[k] for k in STAGING_DEFAULTS},
     }
@@ -297,7 +328,18 @@ def add(atom: dict[str, Any]) -> dict[str, Any]:
     # re-stage of already-present content is always allowed (it changes nothing).
     if not path.exists():
         st = status(binding)
-        if st["budget"]["level"] == "hard":
+        cfg = _staging_cfg()
+        if norm.get("ingest_batch"):
+            # Bulk atoms use the large bulk cap and are exempt from the per-session nag (DP8).
+            batch_count = st["by_label"].get(norm["ingest_batch"], 0)
+            if batch_count >= int(cfg["ingest_bulk_hard_atoms"]):
+                return {"action": "refused", "reason": "ingest-bulk-hard-cap",
+                        "provisional_id": pid, "ingest_batch": norm["ingest_batch"],
+                        "message": (f"Ingest batch {norm['ingest_batch']} hit the bulk hard cap "
+                                    f"({cfg['ingest_bulk_hard_atoms']}). Drain it with "
+                                    f"/mnemex:mnx-promote --bulk before staging more."),
+                        "status": st}
+        elif st["budget"]["level"] == "hard":
             return {"action": "refused", "reason": "staging-hard-cap",
                     "provisional_id": pid, "budget": st["budget"],
                     "message": ("Staging is over its hard budget. Either run /mnemex:mnx-promote to "
@@ -316,12 +358,22 @@ def add(atom: dict[str, Any]) -> dict[str, Any]:
     st = status(binding)
     return {"action": "staged", "provisional_id": pid, "type": norm["type"],
             "score": norm["score"], "urgent": norm["urgent"], "path": str(path),
-            "budget": st["budget"], "status": st}
+            "ingest_batch": norm.get("ingest_batch"), "bulk": bool(norm.get("ingest_batch")),
+            "budget": st["budget"], "by_label": st["by_label"], "status": st}
 
 
-def list_atoms(binding=None) -> dict[str, Any]:
+def _label_match(a: dict[str, Any], label: Optional[str]) -> bool:
+    """None → all atoms; '_session' → only unlabeled session atoms; else → that ingest batch."""
+    if label is None:
+        return True
+    if label == "_session":
+        return not a.get("ingest_batch")
+    return str(a.get("ingest_batch") or "") == label
+
+
+def list_atoms(binding=None, label: Optional[str] = None) -> dict[str, Any]:
     binding = binding or _binding()
-    atoms = _all_atoms(binding)
+    atoms = [a for a in _all_atoms(binding) if _label_match(a, label)]
     items = [{
         "provisional_id": a.get("provisional_id"),
         "type": a.get("type"),
@@ -332,24 +384,30 @@ def list_atoms(binding=None) -> dict[str, Any]:
         "urgent": bool(a.get("urgent")),
         "volatility": a.get("volatility", "default"),
         "trigger": a.get("trigger"),
+        "ingest_batch": a.get("ingest_batch"),
         "mentions": a.get("mentions", []),
         "staged_at": a.get("staged_at"),
         "bytes": a.get("_bytes"),
     } for a in sorted(atoms, key=lambda x: str(x.get("staged_at")), reverse=True)]
-    return {"staging_root": binding.staging_root(), "count": len(items), "atoms": items}
+    return {"staging_root": binding.staging_root(), "count": len(items),
+            "filtered_by": label, "atoms": items}
 
 
-def overlay(domains: Optional[list[str]] = None, binding=None) -> dict[str, Any]:
+def overlay(domains: Optional[list[str]] = None, binding=None,
+            label: Optional[str] = None) -> dict[str, Any]:
     """Staged atoms relevant to a read's routed cluster(s), NEWEST-FIRST (newest-wins).
 
-    Filters by `domain` overlap when domains are given; otherwise returns the whole batch.
-    The caller (mnx-read) marks results `staged/unpromoted`, flags contradictions against the
-    graph, never body-merges, and never stamps — this helper only surfaces candidates + bodies."""
+    Filters by `domain` overlap when domains are given; otherwise returns the whole batch. `label`
+    scopes to one ingest batch (or '_session'). The caller (mnx-read) marks results
+    `staged/unpromoted`, flags contradictions against the graph, never body-merges, and never
+    stamps — this helper only surfaces candidates + bodies."""
     binding = binding or _binding()
     want = {d.strip().lower() for d in (domains or []) if d.strip()}
     atoms = sorted(_all_atoms(binding), key=lambda x: str(x.get("staged_at")), reverse=True)
     out = []
     for a in atoms:
+        if not _label_match(a, label):
+            continue
         adoms = {d.lower() for d in a.get("domain", [])}
         if want and not (want & adoms):
             continue
@@ -363,6 +421,7 @@ def overlay(domains: Optional[list[str]] = None, binding=None) -> dict[str, Any]
             "urgent": bool(a.get("urgent")),
             "volatility": a.get("volatility", "default"),
             "trigger": a.get("trigger"),
+            "ingest_batch": a.get("ingest_batch"),
             "mentions": a.get("mentions", []),
             "staged_at": a.get("staged_at"),
             "provenance": a.get("provenance"),
@@ -373,20 +432,24 @@ def overlay(domains: Optional[list[str]] = None, binding=None) -> dict[str, Any]
             "count": len(out), "atoms": out}
 
 
-def clear(binding=None) -> dict[str, Any]:
-    """Remove ALL staged atoms (the terminal step of a successful promote). Leaves the
-    stamp spill untouched — it is a different file co-located in the same folder."""
+def clear(binding=None, label: Optional[str] = None) -> dict[str, Any]:
+    """Remove staged atoms. `label` scopes the drain to one ingest batch (DP8 — never touches the
+    session atoms or other batches); no label removes ALL (the terminal step of a successful
+    session promote). Leaves the stamp spill untouched — a different file in the same folder."""
     binding = binding or _binding()
     d = _atoms_dir(binding)
     removed = 0
     if d.is_dir():
         for p in d.glob(f"{ID_PREFIX}*.md"):
             try:
+                if label is not None and not _label_match(_load_atom(p), label):
+                    continue
                 p.unlink()
                 removed += 1
             except Exception:
                 continue
-    return {"action": "cleared", "removed": removed, "staging_root": binding.staging_root()}
+    return {"action": "cleared", "removed": removed, "filtered_by": label,
+            "staging_root": binding.staging_root()}
 
 
 def clear_one(pid: str, binding=None) -> dict[str, Any]:
@@ -516,6 +579,12 @@ def _atom_from_argv(argv: list[str]) -> dict[str, Any]:
         "urgent": "--urgent" in argv,
         "volatility": _arg(argv, "--volatility") or "default",
         "body": _arg(argv, "--body") or "",
+        "ingest_batch": _arg(argv, "--ingest-batch"),
+        "source_repo": _arg(argv, "--source-repo"),
+        "commit_sha": _arg(argv, "--commit-sha"),
+        "source_path": _arg(argv, "--source-path"),
+        "anchor": _arg(argv, "--anchor"),
+        "kind": _arg(argv, "--kind"),
         "provenance": {
             "artifact": _arg(argv, "--artifact"),
             "reviews": _arg(argv, "--reviews"),
@@ -539,14 +608,14 @@ def _main(argv: list[str]) -> int:
             res = add(atom)
             return mnx_common.emit(res, ok=res.get("action") != "refused")
         if cmd == "list":
-            return mnx_common.emit(list_atoms())
+            return mnx_common.emit(list_atoms(label=_arg(argv, "--ingest-batch")))
         if cmd in ("status", "size-check"):
             return mnx_common.emit(status())
         if cmd == "overlay":
             doms = _as_list(_arg(argv, "--domain"))
-            return mnx_common.emit(overlay(doms))
+            return mnx_common.emit(overlay(doms, label=_arg(argv, "--ingest-batch")))
         if cmd == "clear":
-            return mnx_common.emit(clear())
+            return mnx_common.emit(clear(label=_arg(argv, "--ingest-batch")))
         if cmd == "clear-one":
             pid = _arg(argv, "--id")
             if not pid:

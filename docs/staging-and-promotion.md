@@ -134,6 +134,26 @@ to clear it: run `mnx-promote` (merge + drain), **or** discard un-promoted captu
 Discard is the cheap, local relief — no merge, no lock, no graph mutation (see *Reviewing and discarding
 staged atoms*). Capture's refusal message and the session nags surface both options.
 
+**Bulk profile (corpus ingest).** The per-session caps above are correct for episodic capture but fatal
+for a corpus. [`mnx-ingest`](corpus-ingestion.md) stages under a **labeled ingest batch**
+(`--ingest-batch <id>` → `bulk: true`) with a **bulk budget profile** — a large cap
+(`ingest_bulk_soft_atoms` 500 / `ingest_bulk_hard_atoms` 5000) meant to be **drained continuously** by
+`mnx-promote --bulk`. Labeled atoms are **label-partitioned** from hand-captures (DP8): they are counted
+separately (`status().by_label`), never trip the per-session soft/hard nag, and `clear --ingest-batch <id>`
+drains only that batch — a user's in-flight episodic captures stay visible and untouched. The bulk caps
+live in the **graph** config (`mnemex.config.md`) since bulk behavior is owned by the graph being imported into.
+
+### `mnx-promote --bulk` (the drain half of ingest)
+`mnx-promote --bulk` adapts the *same* promote for volume — same transaction, single-writer, `mnx_node`
+truth-writes, lock, and doctor gate — but: (1) **forks reconcile per cluster** (plan in parallel, apply
+serially); (2) the approval plan collapses to **per-cluster counts**, surfacing *only* the exceptions
+(contradictions, `⚠ suggested` near-matches from the ER `possible` band, new-cluster creation) and
+**auto-accepting plain CREATE/MERGE** (gate #2 — no per-atom review); (3) **consolidate runs incrementally
+per drained batch over a frozen view** (snapshot-then-apply), not once at the end over a moving target; and
+(4) on confirmed persist it writes the ingest manifest (`source_path@commit → node_ids`) so re-ingest stays
+idempotent. Everything else — link reconciliation (Step 2b), red-link backfill, kind-aware persist — is
+the existing promote, unchanged.
+
 ## 🧹 Reviewing and discarding staged atoms
 
 Staging is **inspectable and prunable** before promote — the `git status` / `git restore --staged` of

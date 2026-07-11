@@ -290,6 +290,24 @@ hoists them into `mentions:` and preserves them verbatim; **promote** resolves t
 over-budget body into sibling pages + a link (capture never splits or resolves).
 ```
 
+### Corpus-atom variant (ingest)
+
+An atom staged by [`mnx-ingest`](corpus-ingestion.md) instead of a live session carries a **source-anchored
+provenance** (self-sufficient to reconcile *cold* and to diff on re-run) plus a top-level **`ingest_batch`
+label** (which sets `bulk: true`, partitioning it from hand-captures — DP8):
+
+```yaml
+ingest_batch: ing-2026-07-11-a1b2   # top-level label → sets bulk: true; drained by mnx-promote --bulk
+bulk: true
+provenance:
+  source_repo: github.com/acme/payments-service   # or an absolute local path
+  commit_sha: 9f3c1a…                              # the exact ref distilled from
+  source_path: settlement/reconcile.md             # file within the corpus
+  anchor: "## Cut-off handling"                     # heading | Lx-Ly | sym:Name — also the glean coverage key
+  kind: doc                                         # doc | interface | code-doc | config
+  rationale: "distilled from settlement design doc"
+```
+
 ---
 
 ## 8️⃣ `.mnemex/` state files
@@ -304,3 +322,4 @@ high-water/version stamps so state is reproducible across clones).
 | `highwater/<team>__<cluster>` | registry line/timestamp replayed up to. WAL checkpoint. |
 | `team.lock` | present only while a mutating op holds the team lock. |
 | `pass.plan.json` | Phase-A plan; presence + dirty tree ⇒ crash recovery on next run. |
+| `ingest/<source-slug>.json` | ingest manifest: `source_path@commit → {hash, node_ids}`. **Committed** with the graph (like `highwater/`), so any clone knows the corpus was imported to commit X and a re-ingest diffs correctly. Written by `mnx-promote --bulk` on confirmed persist; drives the re-ingest delta. |

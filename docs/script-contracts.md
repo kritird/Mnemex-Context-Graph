@@ -272,6 +272,57 @@ config, never the graph's `mnemex.config.md`; strictly local — never clones/sy
 
 ---
 
+## 🏗️ `mnx_ingest.py` — the corpus front-end (walk · classify · chunk · hash · manifest · delta)
+
+The deterministic front half of ingest (docs/corpus-ingestion.md). It acquires a source (local in
+place, or a shallow clone to a read-only cache), walks it, classifies each file, chunks large files
+along structure into candidate *units*, hashes them, and reads/writes the ingest manifest to compute a
+re-run delta. **No judgment, no graph writes, never mutates the source.** stdlib only (imports `mnx_common`).
+
+```
+acquire(source, cache=None) -> {kind: local|remote, root, commit, cached}
+    # local path → used in place; remote URL/*.git → shallow clone into cache (default MNEMEX_INGEST_CACHE).
+probe(root, include=None, exclude=None, max_bytes=1048576)
+    -> {units:[{id, path, kind, anchor, hash, bytes}], counts:{doc,interface,code-doc,config,skip},
+        est_atoms, bytes_total, skipped_secrets}
+    # classify (doc|interface|code-doc|config|skip) by ext+path; chunk docs by h2 headings and code by
+    # EXPORTED symbol (private/underscore symbols are never emitted); a secret file is COUNTED
+    # (skipped_secrets) and its bytes are NEVER opened.
+delta(root, manifest, include=None, exclude=None) -> {added[], changed[], unchanged, orphans:[{path, node_ids}]}
+    # file-granularity diff of walked content-hashes vs the manifest; a deleted file's node_ids surface as
+    # orphan CANDIDATES (never auto-tombstoned — the human decides).
+manifest_write(graph_root, source_slug, files, source_repo=None, last_commit=None) -> {path, files}
+    # merges into <graph>/.mnemex/ingest/<slug>.json (protocol state, committed with the graph beside highwater).
+source_slug(source) -> 'name-<sha1[:8]>'   # mirrors mnx_binding.graph_slug's scheme
+```
+CLI: `acquire --source <p|url> [--cache d] | probe --root d [--include g;g] [--exclude g] [--max-bytes N]
+| delta --root d --manifest p | manifest-write --graph r --source-slug s --json`.
+**Invariants:** never writes the graph and never mutates the source; a secret file's bytes are never read;
+chunking splits along structure but never truncates a unit; `probe`/`delta` are pure over the source
+(deterministic hashes); re-ingest of an unchanged tree yields an empty delta (DP4 idempotency substrate).
+
+---
+
+## 🧹 `mnx_glean.py` — the bounded "what did I miss?" recall primitive (Gleanings)
+
+The mechanical half of *gleanings* (docs/corpus-ingestion.md §8): bound the recall loop and bookkeep it.
+The **judgment** ("what durable fact/entity did I not stage yet?") always stays in the skill/LLM; this
+script writes nothing and reads no graph. Two modes, one per consumer. stdlib only (imports `mnx_common`).
+
+```
+step(before, after, pass_no, max_passes=2) -> {pass, added, stop, reason}   # guardrail (episodic)
+    # added = after-before; stop on no-progress (added<=0, precedence) OR at the pass cap (pass_no>=max).
+coverage(units, staged, pass_no, max_passes=2) -> {total, covered, uncovered:[id…], pass, stop, reason}
+    # checklist (ingest): a unit is COVERED when ≥1 staged atom carries its `anchor` (top-level or under
+    # provenance); returns the still-uncovered unit ids (the re-ask worklist). stop on complete OR cap.
+```
+CLI: `step --before <n> --after <n> --pass <k> [--max 2] | coverage --units u.json --staged s.json --pass <k> [--max 2]`.
+Config `max_glean_passes` (default 2) — user config for episodic, ingest config for corpus.
+**Invariants:** pure/deterministic (same inputs → same output); writes nothing; never reads the graph;
+the loop is bounded (stops at the cap even with gaps remaining) so a glean pass can never run away.
+
+---
+
 ## 📊 `mnx_status.py` — at-a-glance status surface (read-only)
 
 Backs `/mnemex:mnx-status`. Aggregates read-only signals into one JSON object so the user can answer
@@ -407,11 +458,40 @@ by regeneration, never a 3-way merge. (No `STATUS` line on `merge` — git reads
 
 ```
 query(text, scope, threshold=0.4, k=5) -> {candidates:[{id, similarity, cluster, summary}]}
-pairs(scope, threshold=0.5) -> {candidate_pairs:[{a, b, similarity, …}]}   # cross-cluster S2 worklist
+pairs(scope, threshold=0.5, with_atoms=None, intra=False) -> {candidate_pairs:[{a, b, similarity, a_cluster, b_cluster}]}
+    # default (no flags): near-duplicate NODE pairs ACROSS clusters — the doctor's S2 worklist.
+    # AS THE ER BLOCKER (docs/corpus-ingestion.md §9): `with_atoms` injects staged atoms (cluster=null) so
+    # blocking covers staged↔graph and staged↔staged; `intra=True` drops the same-cluster skip so
+    # intra-batch duplicates surface (DP5). The existing cross-cluster S2 behavior is unchanged by default.
 ```
 Pure-python MinHash + LSH over `summary+aliases` (word tokens + 3-char shingles → typo tolerance).
-CLI: `query --text … --scope … [--threshold] | pairs --scope … [--threshold]`.
+CLI: `query --text … --scope … [--threshold] | pairs --scope … [--threshold] [--with staged.json] [--intra]`.
 **Invariants:** consulted ONLY at promote (never the read path); proposes, never writes.
+
+### 🧬 `mnx_er.py` — entity resolution for bulk ingest (block → score → cluster → dispose). PURE PROPOSER
+
+The Fellegi-Sunter ER stage (docs/corpus-ingestion.md §9): reuses `mnx_simindex.pairs` as the blocker,
+scores each blocked pair, clusters the high-confidence matches (union-find), and proposes a disposition
+per cluster. **Writes nothing** — reconcile/HITL disposes; the LLM judge runs ONLY on the `possible` band.
+Imports `mnx_simindex` + `mnx_common`.
+
+```
+resolve(graph, atoms, team=None, match=0.85, possible=0.60)
+    -> {clusters:[{canonical, members:[stg…], aliases:[…], disposition:CREATE|MERGE|COLLAPSE,
+                   target_id:<graph-id|null>, confidence}],
+        possible:[{a, b, score}],                # HITL band → ⚠ suggested at gate #2
+        counts:{create, merge, collapse, possible}}
+score_pair(a, b) -> float   # 0.4·alias/name token-Jaccard + 0.3·summary sim + 0.2·shared domain + 0.1·shared link
+```
+- **Block:** `mnx_simindex.pairs(graph, with_atoms=atoms, intra=True)` over {staged ∪ graph pages}.
+- **Split:** `≥match` → same entity · `[possible, match)` → HITL band · `<possible` → distinct.
+- **Cluster:** union-find over `≥match` pairs; `canonical` = longest existing graph-id, else the
+  best staged summary's slug; UNION all aliases.
+- **Dispose:** graph member in cluster → MERGE (target = that id); all-staged, >1 → COLLAPSE; lone staged → CREATE.
+CLI: `resolve --graph r --atoms staged.json [--team t] [--match 0.85] [--possible 0.60]`.
+**Invariants:** pure proposer (writes nothing, never mutates the graph); one entity → one node (intra-batch
+duplicates collapse before staging); exact-resolves / fuzzy-proposes (the `possible` band never auto-merges);
+runs per delta batch over {new atoms ∪ existing pages}, never globally over the whole graph.
 
 ### Additions to existing scripts
 
@@ -431,6 +511,14 @@ CLI: `query --text … --scope … [--threshold] | pairs --scope … [--threshol
   `drop_held`, `held_status`, `clear_merged(pids)` (per-atom terminal disposition vs all-or-nothing
   `clear`). `status()` now carries a `held` block. CLI `hold | held-list | release-held | drop-held |
   clear-merged`. Config `held_max_age_days` (default 14).
+- **`mnx_stage`** bulk profile + ingest-batch label (corpus ingest, DP8): `add` accepts
+  `--ingest-batch <id>` (sets `bulk: true` + mirrors the label into provenance) plus the corpus-provenance
+  flags `--source-repo/--commit-sha/--source-path/--anchor/--kind`; labeled atoms are counted under a
+  **bulk** cap (`ingest_bulk_hard_atoms`, default 5000) and are exempt from the per-session soft/hard nag.
+  `status()` gains `session_count` + `by_label:{<batch>:n, _session:n}` (the per-session budget is over
+  SESSION atoms only). `list`/`overlay`/`clear` take `--ingest-batch <id>` (or `_session`); `clear
+  --ingest-batch` drains only that batch, never the session atoms or another batch. Config
+  `ingest_bulk_soft_atoms` (500) / `ingest_bulk_hard_atoms` (5000).
 - **`mnx_index.regenerate_index`**: when `tier_files: true`, writes a slim ROUTER `index.md` (Hot +
   counts + freshness) plus `warm.md` / `cold.md` (+ `cold.NNN.md`) / `dead.md`. `mnx_common.parse_index`
   merges sibling tier files transparently, so all consumers see the full tier set either way.

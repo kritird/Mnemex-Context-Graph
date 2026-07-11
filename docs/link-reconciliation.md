@@ -46,16 +46,6 @@ Promote today does two of the three things a mesh needs, and skips the third:
 | 2 | **Disposition** — CREATE / MERGE / SUPERSEDE / DROP-DUP / RESURRECT | ✅ specified (Staging & Promotion §reconcile) |
 | 3 | **Linking** — resolving the note's `[[links]]`, and healing links *into* it from older notes | ❌ **emergent, opportunistic, unspecified** |
 
-And there are two concrete inconsistencies in the shipped system:
-
-- **The mesh code has no home doc.** `mnx_phonebook.py`, `mnx_simindex.py`, `mnx_regen.py` all cite
-  `docs/resilient-mesh-roadmap.md`, which no longer exists. The resolver engine is built and tested, but **nothing wires it into promote**. This document is
-  its home.
-- **Capture is told to record a link it cannot store.** Capture is instructed to split an over-budget unit
-  "into atoms **and capture an edge between them**," but the staged-atom schema has nowhere to put a link.
-  We fix this the way you proposed: **capture stops splitting; it only preserves the `[[links]]` the author
-  wrote. Promote does the split and the linking** (§7).
-
 ---
 
 ## 2️⃣ Division of labour: capture preserves, promote resolves
@@ -418,13 +408,6 @@ apply_links(plan, team)                              # Step 5: writes body links
 # inv 18: phonebook completeness + path accuracy   |  inv 19: unresolved mentions / red links
 # add:    edges == resolved subset of mentions == resolved [[links]] in the body (mirror consistency)
 ```
-
----
-
-## 1️⃣3️⃣ Cleanup
-
-`mnx_phonebook.py`, `mnx_simindex.py`, `mnx_regen.py` cite a `docs/resilient-mesh-roadmap.md` that no
-longer exists. Repoint those docstrings at **this** document as part of the build.
 
 ---
 

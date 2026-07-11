@@ -77,6 +77,16 @@ flowchart TD
     class B,K,F leaf;
 ```
 
+> [!IMPORTANT]
+> **You can bootstrap the whole graph from an existing repo — not just grow it session by session.**
+> [`mnx-ingest`](corpus-ingestion.md) reads an entire code/doc repository and **distills** its durable
+> knowledge — the facts, decisions, and API contracts a future agent will want — into the graph, collapsing
+> redundant restatements into one well-sourced node and wiring the `[[links]]` between them. Crucially, this
+> is **not** a second system bolted on: a live session is one producer of atoms, a corpus is a second, and
+> both converge on the **same** promote → mesh → consolidate backbone. So the day-one graph and the
+> hand-grown graph are the same shape — **no vectors, no server, no global index, no RAG.** That the thesis
+> holds unchanged for a cold corpus is the point, not a caveat.
+
 Wherever this subsystem reads state it is also mutating, consistency breaks subtly. The protocol
 forecloses that entire class with one principle: **snapshot-then-apply** — compute every decision
 against a frozen view, then apply.

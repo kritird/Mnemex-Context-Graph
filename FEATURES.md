@@ -42,6 +42,12 @@ mindmap
       🚀 Promote = git push / PR
       🎯 now / later / not-needed scoring
       🧾 Self-sufficient provenance
+    🏗️ Bootstrap from a repo
+      📚 Ingest code + docs
+      💧 Distill, never RAG
+      🧬 Entity resolution (dedup)
+      🔀 Two gates · idempotent re-run
+      🔎 Gleaning (recall lift)
     🔍 Read path
       🧭 Structural routing
       📚 Chunked tier reads
@@ -191,6 +197,34 @@ flowchart LR
 |---|---|---|
 | 📥 **Capture** | `/mnemex:mnx-capture` | Mines the *live transcript* (facts **and** review corrections) → scores each atom `now`/`later`/`not-needed` → stages locally with self-sufficient provenance. No lock, no push, fully reversible (`--drop` / `--discard-all`). |
 | 🚀 **Promote** | `/mnemex:mnx-promote` | The single writer: flush stamps → reconcile + merge (clean-context sub-agent, **human gate on contradictions**) → consolidate (decay/re-tier/death/edge-hygiene/budget) → doctor → push → clear staging. Atomic + total; `--retry-push` lands a committed-but-unpushed merge without re-merging. |
+| 🏗️ **Ingest** | `/mnemex:mnx-ingest <repo>` | **Bootstrap from an existing code/doc repo** (local or remote) — no live session. Walks → **distills** durable atoms (never transcribes) → dedups entities (one node per entity) → wikifies `[[links]]` → stages a labeled **bulk batch** that `mnx-promote --bulk` merges. **Two gates only**, idempotent on re-run (a deleted file → *orphan candidate*, never auto-death); only stages (promote is the sole writer), never reads secrets, never mutates the source. |
+
+---
+
+## 🏗️ 4½ — Bootstrap a whole graph from a repo you already have
+
+You don't have to grow a graph one session at a time. Point Mnemex at a repository and it builds the memory
+for you — **one command, no live session**:
+
+```bash
+/mnemex:mnx-ingest github.com/acme/payments-service     # or a local path
+```
+
+It reads the **entire code + doc corpus** and turns years of accumulated docs, ADRs, API contracts, and
+code comments into a live, connected graph — the day-one graph and the hand-grown graph are the *same shape*.
+
+| ✅ Feature | 💬 What it means for you |
+|---|---|
+| 💧 **Distills, doesn't dump** | An LLM mines each file for the durable *facts* and *decisions* worth keeping — the graph is *distilled memory*, **not** a vector/RAG index over your repo. Zero atoms from a boilerplate file is a valid answer. |
+| 🧬 **One entity → one node** | Entity resolution collapses the same fact stated five ways (README + design doc + code comment) into **one well-sourced node** with unioned aliases — redundancy becomes provenance, never duplicate nodes. |
+| 🔀 **Two gates, not a thousand** | Approve the scope + routing map **once** up front, then a single bulk summary at the end — **never** per-atom review. A monorepo is one decision. |
+| ♻️ **Idempotent re-runs** | Run it again after the repo changes and it imports **only the diff**; a deleted source file becomes an *orphan candidate* you judge — never silent auto-death. |
+| 🛡️ **Safe by construction** | Ingest **only stages** (promote stays the sole writer), **never reads secrets**, and **never mutates the source**. |
+| 🔎 **Gleaning (recall lift)** | A bounded "what did I miss?" pass raises extraction completeness — and the same technique improves ordinary session capture too. |
+
+Under the hood it's a **source adapter**, not a new subsystem: everything downstream — reconcile, merge, the
+wiki mesh, consolidate, doctor, push — is the **same pipeline** your daily captures flow through, drained by
+`mnx-promote --bulk`. Full model: [`docs/corpus-ingestion.md`](docs/corpus-ingestion.md).
 
 ---
 

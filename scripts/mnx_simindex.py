@@ -116,17 +116,35 @@ def query(text: str, scope: str, threshold: float = 0.4, k: int = 5,
             "note": "fuzzy candidates only — reconcile/HITL confirms; never an auto-edit"}
 
 
-def pairs(scope: str, threshold: float = 0.5, num_perm: int = 64) -> dict[str, Any]:
-    """Near-duplicate node pairs ACROSS clusters (the doctor's S2 worklist). Cross-cluster only —
-    intra-cluster duplication is reconcile's local job; this surfaces the duplication the
-    cluster-local view structurally cannot see."""
+def _inject_staged(idx: dict[str, Any], atoms: list[dict[str, Any]]) -> None:
+    """Add staged atoms ({id, summary, aliases}, cluster=None) into an already-built index so
+    blocking covers staged↔graph and staged↔staged pairs (the ER blocker, corpus-ingestion §9)."""
+    perms = idx["perms"]
+    for a in atoms or []:
+        aid = a.get("id") or a.get("provisional_id")
+        if not aid:
+            continue
+        surface = f"{a.get('summary', '')} {mnx_common.aliases_to_index(a.get('aliases'))}"
+        idx["items"][aid] = {"sig": minhash(tokens(surface), perms), "cluster": None,
+                             "summary": str(a.get("summary", "")),
+                             "aliases": mnx_common.aliases_to_index(a.get("aliases"))}
+
+
+def pairs(scope: str, threshold: float = 0.5, num_perm: int = 64,
+          with_atoms: list[dict[str, Any]] | None = None, intra: bool = False) -> dict[str, Any]:
+    """Near-duplicate pairs. Default (no flags): near-duplicate NODE pairs ACROSS clusters — the
+    doctor's S2 worklist (intra-cluster duplication is reconcile's local job). As the ER blocker
+    (docs/corpus-ingestion.md §9): `with_atoms` injects staged atoms (cluster=None) so blocking
+    covers staged↔graph and staged↔staged; `intra=True` drops the same-cluster skip so intra-batch
+    duplicates surface (needed for DP5 — collapse before staging)."""
     idx = build(scope, num_perm)
+    _inject_staged(idx, with_atoms)
     ids = list(idx["items"])
     out = []
     for i in range(len(ids)):
         for j in range(i + 1, len(ids)):
             a, b = idx["items"][ids[i]], idx["items"][ids[j]]
-            if a["cluster"] == b["cluster"]:
+            if a["cluster"] == b["cluster"] and not intra:
                 continue
             est = jaccard(a["sig"], b["sig"])
             if est >= threshold:
@@ -134,7 +152,7 @@ def pairs(scope: str, threshold: float = 0.5, num_perm: int = 64) -> dict[str, A
                             "a_cluster": a["cluster"], "b_cluster": b["cluster"]})
     out.sort(key=lambda p: -p["similarity"])
     return {"threshold": threshold, "candidate_pairs": out,
-            "note": "possible cross-cluster duplicates (S2) — info-level worklist for human convergence"}
+            "note": "possible near-duplicates — info-level worklist (S2) / ER blocker candidates; never an auto-edit"}
 
 
 def _main(argv: list[str]) -> int:
@@ -149,7 +167,14 @@ def _main(argv: list[str]) -> int:
             return mnx_common.emit(query(opt("--text", ""), opt("--scope", "."),
                                          float(opt("--threshold", "0.4"))))
         if cmd == "pairs":
-            return mnx_common.emit(pairs(opt("--scope", "."), float(opt("--threshold", "0.5"))))
+            with_atoms = None
+            wp = opt("--with")
+            if wp:
+                import json
+                data = json.loads(open(wp, encoding="utf-8").read())
+                with_atoms = data.get("atoms", data) if isinstance(data, dict) else data
+            return mnx_common.emit(pairs(opt("--scope", "."), float(opt("--threshold", "0.5")),
+                                         with_atoms=with_atoms, intra=("--intra" in args)))
         return mnx_common.emit({"error": f"unknown subcommand: {cmd}"}, ok=False)
     except Exception as exc:
         return mnx_common.emit({"error": str(exc)}, ok=False)

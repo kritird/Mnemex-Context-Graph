@@ -1,11 +1,19 @@
 ---
 description: Promote the locally-staged captures into the shared Mnemex graph — flush usage stamps, reconcile + merge every staged atom (clean-context sub-agent, human-in-the-loop on contradictions), consolidate the post-merge graph, run the doctor, push, and clear staging. Atomic and total; the deliberate `git push`/PR half of memory.
-argument-hint: "[--dry-run | --retry-push]"
+argument-hint: "[--dry-run | --retry-push | --bulk [--ingest-batch <id>]]"
 ---
 
 Use the **mnx-promote** skill to merge staging into the Mnemex graph — the deliberate, batched half.
 
 Options: $ARGUMENTS
+
+**`--bulk [--ingest-batch <id>]`** (corpus ingest drain): the volume-adapted promote that
+`/mnemex:mnx-ingest` hands off to — same single-writer, lock, `mnx_node` truth-writes, and doctor gate, but
+reconcile **forks per cluster**, the plan collapses to **per-cluster counts** surfacing only exceptions
+(contradictions, `⚠ suggested` near-matches, new clusters) and **auto-accepts plain CREATE/MERGE** (gate #2 —
+no per-atom review), consolidate runs **incrementally per drained batch over a frozen view**, and on
+confirmed persist it writes the ingest manifest (`source_path@commit → node_ids`) so re-ingest stays
+idempotent. Drains only the labeled batch (`clear --ingest-batch`/`clear-merged`), never a user's hand-captures.
 
 **`--retry-push`** (recovery): if a prior promote committed the merge but the push did not land
 (`mnx_binding.py status` → `unpushed: true`, `ahead > 0`), this pushes that **existing** commit and then
