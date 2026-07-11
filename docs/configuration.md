@@ -4,6 +4,12 @@ All tunables live in `mnemex.config.md` at the repo root — Markdown with a YAM
 it is human-readable *and* machine-parseable. The protocol reads it via `mnx_config.py`. This document
 is the schema, the defaults, and the rules around changing values.
 
+> [!IMPORTANT]
+> 🎚️ **Don't hand-edit the YAML.** View and change config through the **`mnx-config`** skill
+> (`/mnemex:mnx-config` — no args to display, `<key> <value>` to modify). It explains each knob, validates
+> the value, writes it in place, and auto-bumps `config_version` so decay/freshness changes re-normalize
+> safely. Raw edits are error-prone and easy to forget the version bump on.
+
 > [!TIP]
 > 🎛️ **One knob to start.** You really only set `half_life_days`. Patterns get a derived +30% half-life
 > automatically, and every other value has a sensible default. Tune the rest only once real usage tells

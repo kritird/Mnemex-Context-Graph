@@ -1,9 +1,10 @@
 # 🎛️ Skills, Commands, and Hooks
 
-Mnemex ships **six user-facing skills** (the agent-facing playbooks — `mnx-read`, `mnx-capture`,
-`mnx-promote`, `mnx-doctor`, `mnx-init`, and `mnx-status`) plus one **internal** skill (`mnx-consolidate`,
-the maintenance pass invoked by `mnx-promote` — no slash command), **six commands** (the slash-command
-surface), and a small set of **hooks** (deterministic event handlers that do what a skill cannot). This
+Mnemex ships **seven user-facing skills** (the agent-facing playbooks — `mnx-read`, `mnx-capture`,
+`mnx-promote`, `mnx-doctor`, `mnx-init`, `mnx-status`, and `mnx-config`) plus one **internal** skill
+(`mnx-consolidate`, the maintenance pass invoked by `mnx-promote` — no slash command), **seven commands**
+(the slash-command surface), and a small set of **hooks** (deterministic event handlers that do what a
+skill cannot). This
 document gives the phase breakdown for each. The authoritative skill text lives in `skills/<name>/SKILL.md`;
 the command stubs in `commands/`; the hooks in `hooks/hooks.json`.
 
@@ -23,12 +24,13 @@ flowchart TD
     HUB --> PROM[🚀 mnx-promote<br/><i>merge + push</i>]
     HUB --> DOC[🩺 mnx-doctor<br/><i>validate</i>]
     HUB --> STAT[📊 mnx-status<br/><i>report</i>]
+    HUB --> CFG[🎚️ mnx-config<br/><i>view / tune</i>]
     PROM -.->|back half, internal| CONS[♻️ mnx-consolidate]
     classDef setup fill:#0e5a5a,stroke:#3cc,color:#fff;
     classDef op fill:#4b2e83,stroke:#a98ce0,color:#fff;
     classDef hub fill:#a86a12,stroke:#fb3,color:#fff;
     class INIT,STAT setup;
-    class READ,CAP,PROM,DOC,CONS op;
+    class READ,CAP,PROM,DOC,CONS,CFG op;
     class HUB hub;
 ```
 

@@ -125,15 +125,29 @@ def is_valid_id(s: str) -> bool:
 def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     """Return (front-matter dict, body). Empty dict if no leading YAML block."""
     _require_yaml()
-    if not text.startswith("---"):
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
         return {}, text
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+    # The closing fence is the next line that is EXACTLY '---'. Splitting on the raw
+    # substring '---' is wrong: a comment inside the block (e.g. '# --- Tiers ---')
+    # would be mistaken for the fence, truncating the parsed front-matter.
+    close = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            close = i
+            break
+    if close is None:
         return {}, text
-    data = yaml.safe_load(parts[1]) or {}
+    fm_text = "".join(lines[1:close])
+    # Preserve the original body semantics: everything after the closing fence's
+    # '---' (including the remainder of the fence line), matching the prior split.
+    fence_line = lines[close]
+    dash = fence_line.index("---")
+    body = fence_line[dash + 3:] + "".join(lines[close + 1:])
+    data = yaml.safe_load(fm_text) or {}
     if not isinstance(data, dict):
         raise ValueError("front-matter is not a mapping")
-    return _normalize_dates(data), parts[2]
+    return _normalize_dates(data), body
 
 
 def read_frontmatter(path: str | Path) -> dict[str, Any]:
