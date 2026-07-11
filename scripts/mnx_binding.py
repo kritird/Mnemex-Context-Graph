@@ -567,7 +567,7 @@ def _arg_after(argv: list[str], flag: str) -> Optional[str]:
     return None
 
 
-def main(argv: list[str]) -> int:
+def _main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "resolve"
 
     if yaml is None:
@@ -632,5 +632,7 @@ def main(argv: list[str]) -> int:
     return _emit({"error": f"unknown subcommand: {cmd}"}, EXIT_ERROR)
 
 
+main = _main  # back-compat alias; `_main(argv)` is the engine-wide dispatcher name (plan v2, 0e)
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(_main(sys.argv))

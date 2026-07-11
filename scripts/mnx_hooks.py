@@ -596,7 +596,7 @@ def _session_arg(argv: list[str]) -> str:
     return ""
 
 
-def main(argv: list[str]) -> int:
+def _main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else ""
     try:
         # opt-out / opt-in are agent-run plain commands (argv-driven, no stdin event).
@@ -625,5 +625,7 @@ def main(argv: list[str]) -> int:
         return 0
 
 
+main = _main  # back-compat alias; `_main(argv)` is the engine-wide dispatcher name (plan v2, 0e)
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(_main(sys.argv))
