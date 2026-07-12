@@ -389,6 +389,10 @@ def list_atoms(binding=None, label: Optional[str] = None) -> dict[str, Any]:
         "mentions": a.get("mentions", []),
         "staged_at": a.get("staged_at"),
         "bytes": a.get("_bytes"),
+        # Provenance must survive the projection: glean coverage keys on provenance.anchor and
+        # promote reconciles COLD from it (E2E 2026-07-12 finding G6 — same projection-drop
+        # class as the fixed volatility bug F5).
+        "provenance": a.get("provenance", {}),
     } for a in sorted(atoms, key=lambda x: str(x.get("staged_at")), reverse=True)]
     return {"staging_root": binding.staging_root(), "count": len(items),
             "filtered_by": label, "atoms": items}

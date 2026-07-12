@@ -24,6 +24,7 @@ Dependencies: Python 3.9+ stdlib only (JSON I/O). Imports mnx_common for emit. S
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Any, Optional
 
@@ -33,15 +34,20 @@ DEFAULT_MAX_PASSES = 2
 
 
 def _anchor_of(obj: Any) -> Optional[str]:
-    """The coverage key of a unit or a staged atom: its `anchor` (top-level or under provenance)."""
+    """The coverage key of a unit or a staged atom: its `anchor` (top-level or under provenance),
+    NORMALIZED so both sides of the match agree regardless of authoring style — probe units carry
+    bare heading text while extractors often write the `## Heading` line (live E2E 2026-07-12,
+    finding G6): leading `#`s stripped, whitespace trimmed, case-folded."""
     if not isinstance(obj, dict):
         return None
-    if obj.get("anchor"):
-        return str(obj["anchor"]).strip()
-    prov = obj.get("provenance")
-    if isinstance(prov, dict) and prov.get("anchor"):
-        return str(prov["anchor"]).strip()
-    return None
+    raw = obj.get("anchor")
+    if not raw:
+        prov = obj.get("provenance")
+        if isinstance(prov, dict):
+            raw = prov.get("anchor")
+    if not raw:
+        return None
+    return re.sub(r"^#+\s*", "", str(raw).strip()).casefold() or None
 
 
 # --- guardrail mode (episodic capture) --------------------------------------
