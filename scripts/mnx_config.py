@@ -453,6 +453,12 @@ def set_value(repo: str, key: str, raw: str) -> dict[str, Any]:
 
 def _main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else ""
+    # Every subcommand takes a scope path first; a missing one must be a usage error,
+    # not a bare "list index out of range" (E2E 2026-07-12, finding G2).
+    if cmd in ("load", "derive", "drift", "stamp", "show", "set", "horizon") and len(argv) < 3:
+        return mnx_common.emit(
+            {"error": f"usage: {cmd} <team-or-graph path>"
+                      + (" <key> <value>" if cmd == "set" else "")}, ok=False)
     try:
         if cmd == "load":
             return mnx_common.emit(load(argv[2]))

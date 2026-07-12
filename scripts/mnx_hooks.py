@@ -147,8 +147,9 @@ def _session_nags(binding) -> list[str]:
                     continue
         if overdue_teams:
             worst = max(d for _, d in overdue_teams)
-            nags.append(f"Mnemex: graph consolidation overdue ({len(overdue_teams)} team(s), up to "
-                        f"{worst}d). Run /mnemex:mnx-promote (consolidation is its back half).")
+            detail = f", up to {worst}d" if worst > 0 else ""
+            nags.append(f"Mnemex: graph consolidation overdue ({len(overdue_teams)} team(s){detail}). "
+                        "Run /mnemex:mnx-promote (consolidation is its back half).")
     except Exception:
         pass
     return nags

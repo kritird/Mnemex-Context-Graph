@@ -236,21 +236,49 @@ def overdue(team: str, cfg: dict[str, Any], now: str) -> dict[str, Any]:
     """Return {due, days_overdue, config_drift} for the maintenance-due warning.
 
     mnx-read warns on this; it never acts (F6).
+
+    Scope-aware (E2E finding F7): given a TEAM dir it checks that team; given the GRAPH ROOT
+    it aggregates over every team-*/ dir (the old behavior keyed the root by its clone-slug,
+    which can never match a per-team stamp → a permanent false "overdue").
+    A NEVER-compacted team is not nagged from birth (finding G4): when a config stamp exists,
+    its stamped_at is the baseline and the cadence must actually elapse first; only a team with
+    no stamp at all (pre-init legacy) stays due immediately.
     """
     root = mnx_common.require_graph_root(team)
-    team_name = mnx_common.team_of(root, team) or Path(team).name
+    team_name = mnx_common.team_of(root, team)
+    if team_name is None and Path(team).resolve() == Path(root).resolve():
+        # Graph-root scope → aggregate per team (mirrors mnx_hooks._session_nags).
+        teams = []
+        for team_dir in sorted(p for p in Path(root).iterdir()
+                               if p.is_dir() and p.name.startswith("team-")):
+            try:
+                tcfg = mnx_config.load(str(team_dir))
+                teams.append(overdue(str(team_dir), tcfg, now))
+            except Exception:
+                continue
+        due_teams = [t for t in teams if t.get("due")]
+        return {"due": bool(due_teams),
+                "days_overdue": max((t.get("days_overdue", 0) for t in due_teams), default=0),
+                "config_drift": any(t.get("config_drift") for t in teams),
+                "scope": "graph", "teams": teams,
+                "overdue_teams": [t["team"] for t in due_teams]}
+    team_name = team_name or Path(team).name
     cadence = float(cfg.get("compaction_cadence_days", 14))
     drift = mnx_config.changed_since_last_compaction(team, cfg)
     last = _last_compaction(team, team_name)
-    if last is None:
-        return {"due": True, "days_overdue": 0, "never_compacted": True,
-                "config_drift": drift, "team": team_name}
+    never = last is None
+    if never:
+        stamp = mnx_config.read_stamp(team)
+        last = (stamp or {}).get("stamped_at")
+        if last is None:
+            return {"due": True, "days_overdue": 0, "never_compacted": True,
+                    "config_drift": drift, "team": team_name}
     days_since = mnx_common.clamp_dt(last, now) / mnx_common.SECONDS_PER_DAY
     due = days_since > cadence
     return {"due": due or drift,
             "days_overdue": max(0, int(math.floor(days_since - cadence))),
             "days_since": round(days_since, 2),
-            "never_compacted": False,
+            "never_compacted": never,
             "config_drift": drift, "team": team_name}
 
 
