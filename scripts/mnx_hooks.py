@@ -1,4 +1,15 @@
-"""mnx_hooks.py — Claude Code hook entrypoints (advisory; never mutate knowledge).
+"""mnx_hooks.py — session-lifecycle hook logic + the Claude Code hook adapter.
+
+Layered per the multi-agent plan (v2 §7, Phase 0 commit 0f):
+
+  * ``core_*(event: dict) -> HookOutcome`` — the per-event logic, host-neutral. Takes an
+    already-parsed event dict, performs the side effects (marker state, stamp flushes,
+    doctor checks), and returns a ``HookOutcome`` describing what to deliver. Never reads
+    stdin, never prints. Foreign-host adapters (the OpenCode plugin, Phase 4) normalize
+    their event payload into the same dict shape and render the outcome themselves.
+  * Claude adapters (``session_start`` … ``post_apply_check``, dispatched by ``_main``) —
+    read the event JSON from stdin per the Claude Code hooks protocol and render the
+    outcome in Claude's hook output shape (``_emit_claude``).
 
 Subcommands (argv[1]):
   session-start      : resolve the binding and sync the graph (blocking), then inject a one-time
@@ -41,8 +52,7 @@ Subcommands (argv[1]):
 
 Contract: with the single exception of the pre-commit-gate DENY, hooks are ADVISORY. They never
 raise and never block on internal errors — a failing hook must not disrupt the user's session
-(the gate fails open). Hooks read event JSON on stdin per the Claude Code hooks protocol.
-See docs/skills-commands-hooks.md §6.
+(the gate fails open). See docs/skills-commands-hooks.md §6.
 
 Dependencies: Python 3.9+ stdlib + PyYAML only.
 """
@@ -52,11 +62,45 @@ import json
 import os
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import mnx_binding
 import mnx_common
 import mnx_stamp
+
+
+# --------------------------------------------------------------------------- #
+# HookOutcome — the host-neutral result of one hook event
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class HookOutcome:
+    """What a hook event wants delivered, independent of any host's wire shape.
+
+    At most one delivery intent is set per event (the adapter renders the first that
+    applies, in the order below); ``notices`` may accompany none-of-the-above surfaces
+    like SessionEnd. All-empty means the hook stays silent — the common case.
+
+      deny_reason  — deny the pending tool call (the pre-commit gate; the ONE blocker)
+      block_reason — interrupt the host's wrap-up so the agent gets one more turn (Stop)
+      context      — advisory text to inject into the model's context
+      notices      — plain one-way lines for surfaces that cannot inject context
+    """
+    deny_reason: str | None = None
+    block_reason: str | None = None
+    context: str | None = None
+    notices: list[str] = field(default_factory=list)
+
+    @property
+    def silent(self) -> bool:
+        return not (self.deny_reason or self.block_reason or self.context or self.notices)
+
+
+# The command generator for the consent primer's opt-in/opt-out instructions. This is one of
+# the two places the literal ${CLAUDE_PLUGIN_ROOT} survives (with hooks/hooks.json) — Claude
+# Code expands it. Foreign hosts pass their own base (e.g. `python3 -m openmnemex.mnx_hooks`).
+CLAUDE_HOOK_CMD_BASE = 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_hooks.py"'
 
 
 def _session_nags(binding) -> list[str]:
@@ -181,12 +225,12 @@ def _is_consented(session_id: str) -> bool:
         return False
 
 
-def _set_mute(session_id: str, on: bool) -> int:
+def core_set_mute(session_id: str, on: bool) -> dict:
     """opt-out (on=True) / opt-in (on=False). Toggles the paired mute + consent markers.
 
     opt-out  -> mute ON,  consent OFF (user declined; every hook goes silent).
     opt-in   -> mute OFF, consent ON  (user agreed; arms the per-prompt read reminder).
-    Reads no stdin and never raises — the agent runs it as a plain command."""
+    Never raises; returns the resulting state for the adapter to render."""
     m, c = _mute_marker(session_id), _consent_marker(session_id)
     try:
         m.parent.mkdir(parents=True, exist_ok=True)
@@ -198,8 +242,7 @@ def _set_mute(session_id: str, on: bool) -> int:
             c.write_text("consented", encoding="utf-8")
     except Exception:
         pass
-    print(json.dumps({"mnemex": "muted" if on else "active", "session": session_id}))
-    return 0
+    return {"mnemex": "muted" if on else "active", "session": session_id}
 
 
 def _onboarded_marker() -> Path:
@@ -224,49 +267,47 @@ def _flush_usage_stamps() -> dict:
         return {"action": "skipped", "error": str(exc)}
 
 
-def _onboard_notice() -> int:
-    """Fire a one-time onboarding notice when Mnemex is installed but no graph is bound.
+def _onboard_outcome() -> HookOutcome:
+    """The one-time onboarding notice when Mnemex is installed but no graph is bound.
 
     Without this, a fresh install is completely silent at the one moment the user most
-    needs direction. Fires at most once ever (a durable marker under ~/.claude), so it
-    never nags users who run Mnemex in projects that intentionally have no graph.
+    needs direction. Fires at most once ever (a durable marker under the mnemex home), so
+    it never nags users who run Mnemex in projects that intentionally have no graph.
     """
     marker = _onboarded_marker()
     if marker.exists():
-        return 0
+        return HookOutcome()
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("shown", encoding="utf-8")
     except Exception:
-        return 0  # cannot persist the marker -> stay silent rather than nag every session
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-            "additionalContext": (
-                "Mnemex is installed but no knowledge graph is configured for this project. "
-                "If the user wants persistent, self-pruning agent memory, run /mnemex:mnx-init "
-                "to create or bind a graph. Otherwise ignore this — it will not be shown again."
-            ),
-        }
-    }))
-    return 0
+        return HookOutcome()  # cannot persist the marker -> stay silent rather than nag every session
+    return HookOutcome(context=(
+        "Mnemex is installed but no knowledge graph is configured for this project. "
+        "If the user wants persistent, self-pruning agent memory, run /mnemex:mnx-init "
+        "to create or bind a graph. Otherwise ignore this — it will not be shown again."
+    ))
 
 
-def session_start() -> int:
+# --------------------------------------------------------------------------- #
+# core per-event logic (host-neutral: event dict in, HookOutcome out)
+# --------------------------------------------------------------------------- #
+
+def core_session_start(event: dict, hook_cmd_base: str = CLAUDE_HOOK_CMD_BASE) -> HookOutcome:
     """Blocking: sync the bound graph, then ask the agent to get the user's CONSENT for the session.
 
     Instead of nudging on every turn, Mnemex asks once at the top of the session whether to use the
     graph. If the user agrees, the agent reads before domain work and writes to capture; if not, the
     agent runs `opt-out` (the command is handed to it with this session's id baked in) and every other
     Mnemex hook goes silent for the rest of the session. Stays silent if already muted.
+    ``hook_cmd_base`` is how the primer tells the agent to run opt-in/opt-out on THIS host.
     """
-    event = _read_event()
     binding = mnx_binding.resolve()
     if binding is None:
-        return _onboard_notice()  # no graph configured — nudge to mnx-init (once)
+        return _onboard_outcome()  # no graph configured — nudge to mnx-init (once)
     sid = str(event.get("session_id", ""))
     if _is_muted(sid):
-        return 0  # user already muted Mnemex this session (e.g. SessionStart re-fired on resume)
+        return HookOutcome()  # user already muted Mnemex this session (e.g. SessionStart re-fired on resume)
     res = mnx_binding.sync(binding)
     action = res.get("action")
     label = _graph_label(binding)
@@ -282,9 +323,8 @@ def session_start() -> int:
     lines = [f"Mnemex: {status} ({label})"]
     if available:
         team = f" (default team: {binding.default_team})" if binding.default_team else ""
-        base = f'python3 "${{CLAUDE_PLUGIN_ROOT}}/scripts/mnx_hooks.py"'
-        optin_cmd = f"{base} opt-in --session {sid}"
-        mute_cmd = f"{base} opt-out --session {sid}"
+        optin_cmd = f"{hook_cmd_base} opt-in --session {sid}"
+        mute_cmd = f"{hook_cmd_base} opt-out --session {sid}"
         lines.append(
             "A Mnemex knowledge graph is available" + team + ". Get the user's consent ONCE, up front, "
             "before doing domain work this session — ask plainly whether they want you to use Mnemex "
@@ -304,44 +344,31 @@ def session_start() -> int:
             "    After muting, do not bring Mnemex up again unless the user explicitly asks for it."
         )
         lines += _session_nags(binding)  # staged-pending / consolidation-overdue (nag only; no auto-run)
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-            "additionalContext": "\n".join(lines),
-        }
-    }))
-    return 0
+    return HookOutcome(context="\n".join(lines))
 
 
-def user_prompt_submit() -> int:
-    """(UserPromptSubmit) once the user has CONSENTED, inject a short read/capture reminder on every
-    prompt. Silent otherwise: muted (user said no) or not-yet-answered (no consent marker) both no-op,
+def core_user_prompt_submit(event: dict) -> HookOutcome:
+    """Once the user has CONSENTED, inject a short read/capture reminder on every prompt.
+
+    Silent otherwise: muted (user said no) or not-yet-answered (no consent marker) both no-op,
     and it stays silent when no graph is bound. This is the per-turn counterpart to the one-time
-    SessionStart primer — consent is asked once, then this keeps the routing in front of the agent.
+    session-start primer — consent is asked once, then this keeps the routing in front of the agent.
     """
-    event = _read_event()
     sid = str(event.get("session_id", ""))
     if _is_muted(sid) or not _is_consented(sid):
-        return 0  # user declined, or has not agreed yet — the SessionStart primer owns the ask
+        return HookOutcome()  # user declined, or has not agreed yet — the session-start primer owns the ask
     binding = mnx_binding.resolve()
     if binding is None:
-        return 0  # no graph bound here — nothing to route to
-    reminder = (
+        return HookOutcome()  # no graph bound here — nothing to route to
+    return HookOutcome(context=(
         "Mnemex is active for this session. Before working on a task in a domain the graph may cover, "
         "load prior knowledge first with the mnx-read skill (or /mnemex:mnx-read). If this turn produces "
         "durable knowledge or review decisions, stage it with /mnemex:mnx-capture (cheap + local; do NOT "
         "auto-promote)."
-    )
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "UserPromptSubmit",
-            "additionalContext": reminder,
-        }
-    }))
-    return 0
+    ))
 
 
-def stop() -> int:
+def core_stop(event: dict) -> HookOutcome:
     """Interrupt the agent's wrap-up ONCE per session to have it ask about capturing knowledge.
 
     Unlike session-end (which fires after the conversation is over and can only emit a one-way
@@ -354,24 +381,23 @@ def stop() -> int:
     events, not a timer. If the marker can't be written we stay silent rather than risk repeated
     interruptions. If the session is muted (the user declined Mnemex at session start), this is a no-op.
     """
-    event = _read_event()
     sid = str(event.get("session_id", ""))
     if _is_muted(sid):
-        return 0  # user declined Mnemex this session — no stamps, no capture nudge
+        return HookOutcome()  # user declined Mnemex this session — no stamps, no capture nudge
     _flush_usage_stamps()  # batch-push this turn's usage stamps (silent; advisory)
     if event.get("stop_hook_active"):
-        return 0  # this stop is already the result of our nudge — let it through
+        return HookOutcome()  # this stop is already the result of our nudge — let it through
     binding = mnx_binding.resolve()
     if binding is None:
-        return 0  # no graph bound here — nothing to capture
+        return HookOutcome()  # no graph bound here — nothing to capture
     marker = _stop_marker(sid)
     if marker.exists():
-        return 0  # already nudged this session (and no compaction has re-armed it since)
+        return HookOutcome()  # already nudged this session (and no compaction has re-armed it since)
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("nudged", encoding="utf-8")
     except Exception:
-        return 0  # cannot persist the marker -> don't block, to avoid a nag loop
+        return HookOutcome()  # cannot persist the marker -> don't block, to avoid a nag loop
     # Was this nudge re-armed by a compaction? If so, sharpen it to the delta that was just lost.
     after_compaction = False
     cmark = _compaction_marker(sid)
@@ -399,11 +425,10 @@ def stop() -> int:
             "/mnemex:mnx-promote step. If nothing durable was produced, say so briefly and stop. This "
             "reminder fires once per session (and once more after any compaction)."
         )
-    print(json.dumps({"decision": "block", "reason": reason}))
-    return 0
+    return HookOutcome(block_reason=reason)
 
 
-def pre_compact() -> int:
+def core_pre_compact(event: dict) -> HookOutcome:
     """Right before the transcript is summarized, re-arm the Stop capture nudge for the lost window.
 
     Compaction is the one moment session detail is actually destroyed — precisely when uncaptured
@@ -413,30 +438,28 @@ def pre_compact() -> int:
     the compacted window produced. Re-nudging is therefore bounded by real loss events, not a timer.
     Best-effort flush of pending usage stamps too. No-op when muted; never auto-writes.
     """
-    event = _read_event()
     sid = str(event.get("session_id", ""))
     if _is_muted(sid):
-        return 0  # user declined Mnemex this session — no re-arm, no flush
+        return HookOutcome()  # user declined Mnemex this session — no re-arm, no flush
     binding = mnx_binding.resolve()
     if binding is None:
-        return 0  # no graph bound here — nothing to capture
+        return HookOutcome()  # no graph bound here — nothing to capture
     _flush_usage_stamps()  # safety: batch out any stamps this turn's Stop hasn't flushed yet
     try:  # re-arm the Stop nudge: drop the once-per-session marker, mark the loss event
         _compaction_marker(sid).parent.mkdir(parents=True, exist_ok=True)
         _stop_marker(sid).unlink(missing_ok=True)
         _compaction_marker(sid).write_text("compacted", encoding="utf-8")
     except Exception:
-        return 0  # can't persist markers -> stay silent rather than misbehave
-    return 0
+        pass  # can't persist markers -> stay silent rather than misbehave
+    return HookOutcome()
 
 
-def session_end() -> int:
+def core_session_end(event: dict) -> HookOutcome:
     """Advisory nudge to persist knowledge. Never auto-writes.
 
     A hook script cannot inspect the transcript to confirm 'knowledge-bearing work happened', so this
     reminder is unconditional whenever a graph is bound. The agent/user decides whether to act.
     """
-    event = _read_event()
     sid = str(event.get("session_id", ""))
     muted = _is_muted(sid)
     for marker in (_stop_marker(sid), _mute_marker(sid), _consent_marker(sid), _compaction_marker(sid)):
@@ -445,21 +468,21 @@ def session_end() -> int:
         except Exception:
             pass
     if muted:
-        return 0  # user declined Mnemex this session — nothing to flush or nudge
+        return HookOutcome()  # user declined Mnemex this session — nothing to flush or nudge
     binding = mnx_binding.resolve()
     if binding is None:
-        return 0
+        return HookOutcome()
+    notices: list[str] = []
     res = _flush_usage_stamps()  # safety net: flush anything the per-turn Stop flush missed
     if res.get("action") == "flushed":
-        print(f"Mnemex: flushed {res.get('pending')} usage stamp(s) to the graph.")
+        notices.append(f"Mnemex: flushed {res.get('pending')} usage stamp(s) to the graph.")
     elif res.get("action") == "deferred":
-        print("Mnemex: usage stamps could not be pushed (offline?); they are retained and "
-              "will flush next session.")
-    print("Mnemex: if this session produced durable knowledge or review decisions, stage it with "
-          "/mnemex:mnx-capture so it is not lost (merge it later with /mnemex:mnx-promote).")
-    for nag in _session_nags(binding):  # staged-pending / consolidation-overdue (nag only)
-        print(nag)
-    return 0
+        notices.append("Mnemex: usage stamps could not be pushed (offline?); they are retained and "
+                       "will flush next session.")
+    notices.append("Mnemex: if this session produced durable knowledge or review decisions, stage it with "
+                   "/mnemex:mnx-capture so it is not lost (merge it later with /mnemex:mnx-promote).")
+    notices.extend(_session_nags(binding))  # staged-pending / consolidation-overdue (nag only)
+    return HookOutcome(notices=notices)
 
 
 # --- tool-call gates (PreToolUse / PostToolUse, Bash matcher) ---------------
@@ -503,64 +526,55 @@ def _within_graph(target: str, graph_root: str) -> bool:
     return t == g or g in t.parents
 
 
-def pre_commit_gate() -> int:
+def core_pre_commit_gate(event: dict) -> HookOutcome:
     """Deny a `git commit` inside the bound graph repo when the doctor finds error-level invariant
     violations — a structurally broken graph must not be committed. Only fires for commits in the
     graph repo (never the author's project), and fails OPEN on any internal error."""
-    event = _read_event()
     command = _tool_command(event)
     if not command or not _GIT_COMMIT_RE.search(command):
-        return 0  # not a git commit
+        return HookOutcome()  # not a git commit
     binding = mnx_binding.resolve()
     if binding is None:
-        return 0  # no graph bound — nothing to gate
+        return HookOutcome()  # no graph bound — nothing to gate
     graph_root = binding.graph_root()
     target = _effective_dir(command, event.get("cwd") or os.getcwd())
     if not _within_graph(target, graph_root):
-        return 0  # commit targets the author's project, not the graph — never interfere
+        return HookOutcome()  # commit targets the author's project, not the graph — never interfere
     try:
         import mnx_doctor
         report = mnx_doctor.check(graph_root)
     except Exception:
-        return 0  # cannot validate (graph not scaffolded, parse error, …) — fail open
+        return HookOutcome()  # cannot validate (graph not scaffolded, parse error, …) — fail open
     errs = [f for f in report.get("findings", []) if f.get("severity") == "E"]
     if not errs:
-        return 0  # graph is clean — allow the commit
+        return HookOutcome()  # graph is clean — allow the commit
     preview = "; ".join(
         f"[inv {f.get('invariant')}] {f.get('node_or_edge')}: {f.get('detail')}" for f in errs[:5])
     more = f" (+{len(errs) - 5} more)" if len(errs) > 5 else ""
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": (
-                f"Mnemex blocked this commit: the graph has {len(errs)} error-level invariant "
-                f"violation(s); committing would persist a broken graph. {preview}{more}. "
-                f"Run /mnemex:mnx-doctor --fix to rebuild derived files (indexes, cross-links, "
-                f"reverse map); fix any node-level corruption by hand, then commit again."
-            ),
-        }
-    }))
-    return 0
+    return HookOutcome(deny_reason=(
+        f"Mnemex blocked this commit: the graph has {len(errs)} error-level invariant "
+        f"violation(s); committing would persist a broken graph. {preview}{more}. "
+        f"Run /mnemex:mnx-doctor --fix to rebuild derived files (indexes, cross-links, "
+        f"reverse map); fix any node-level corruption by hand, then commit again."
+    ))
 
 
-def post_apply_check() -> int:
+def core_post_apply_check(event: dict) -> HookOutcome:
     """After a Mnemex mutation command, surface a stranded pass.plan.json / unreleased lock (a
     crashed gc/write) so it does not silently wedge the next pass. Advisory — never blocks."""
-    event = _read_event()
     command = _tool_command(event)
     if not command or not _MNEMEX_CMD_RE.search(command):
-        return 0  # not a mnemex command — don't scan the graph on every Bash call
+        return HookOutcome()  # not a mnemex command — don't scan the graph on every Bash call
     binding = mnx_binding.resolve()
     if binding is None:
-        return 0
+        return HookOutcome()
     root = Path(binding.graph_root())
     if not root.is_dir():
-        return 0
+        return HookOutcome()
     try:
         import mnx_lock
     except Exception:
-        return 0
+        return HookOutcome()
     stranded: list[tuple[str, dict]] = []
     for team_dir in sorted(p for p in root.iterdir() if p.is_dir() and p.name.startswith("team-")):
         try:
@@ -569,7 +583,7 @@ def post_apply_check() -> int:
         except Exception:
             continue
     if not stranded:
-        return 0
+        return HookOutcome()
     lines = ["Mnemex: a maintenance/write pass left state behind — a gc/write may have crashed "
              "(or one is still running concurrently):"]
     for name, rec in stranded:
@@ -579,13 +593,76 @@ def post_apply_check() -> int:
     lines.append("If no pass is running, recover before the next write/gc: 'rollback' = "
                  "`git checkout .` in the graph (restore the last good commit); 'replay' = the "
                  "commit landed, just clear the stranded plan. mnx-doctor flags this as invariant 16.")
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
-            "additionalContext": "\n".join(lines),
-        }
-    }))
+    return HookOutcome(context="\n".join(lines))
+
+
+# --------------------------------------------------------------------------- #
+# Claude Code adapter (stdin event JSON in, Claude hook output shape on stdout)
+# --------------------------------------------------------------------------- #
+
+def _emit_claude(event_name: str, outcome: HookOutcome) -> int:
+    """Render a HookOutcome in Claude Code's hook output shape. Silent outcome emits nothing."""
+    if outcome.deny_reason is not None:
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "permissionDecision": "deny",
+                "permissionDecisionReason": outcome.deny_reason,
+            }
+        }))
+    elif outcome.block_reason is not None:
+        print(json.dumps({"decision": "block", "reason": outcome.block_reason}))
+    elif outcome.context is not None:
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "additionalContext": outcome.context,
+            }
+        }))
+    for line in outcome.notices:
+        print(line)
     return 0
+
+
+def _set_mute(session_id: str, on: bool) -> int:
+    """Claude adapter for opt-out/opt-in: argv-driven plain command, prints the state JSON."""
+    print(json.dumps(core_set_mute(session_id, on)))
+    return 0
+
+
+def session_start() -> int:
+    """Claude adapter: stdin event → core_session_start → SessionStart context injection."""
+    return _emit_claude("SessionStart", core_session_start(_read_event()))
+
+
+def user_prompt_submit() -> int:
+    """Claude adapter: stdin event → core_user_prompt_submit → UserPromptSubmit context injection."""
+    return _emit_claude("UserPromptSubmit", core_user_prompt_submit(_read_event()))
+
+
+def stop() -> int:
+    """Claude adapter: stdin event → core_stop → Stop block decision (or silence)."""
+    return _emit_claude("Stop", core_stop(_read_event()))
+
+
+def pre_compact() -> int:
+    """Claude adapter: stdin event → core_pre_compact (side effects only; always silent)."""
+    return _emit_claude("PreCompact", core_pre_compact(_read_event()))
+
+
+def session_end() -> int:
+    """Claude adapter: stdin event → core_session_end → plain advisory lines."""
+    return _emit_claude("SessionEnd", core_session_end(_read_event()))
+
+
+def pre_commit_gate() -> int:
+    """Claude adapter: stdin event → core_pre_commit_gate → PreToolUse deny (or silence)."""
+    return _emit_claude("PreToolUse", core_pre_commit_gate(_read_event()))
+
+
+def post_apply_check() -> int:
+    """Claude adapter: stdin event → core_post_apply_check → PostToolUse context injection."""
+    return _emit_claude("PostToolUse", core_post_apply_check(_read_event()))
 
 
 def _session_arg(argv: list[str]) -> str:
