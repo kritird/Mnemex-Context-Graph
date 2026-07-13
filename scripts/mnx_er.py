@@ -256,6 +256,29 @@ def _union_aliases(items: dict[str, dict[str, Any]], members: list[str]) -> list
 
 
 def _canonical_slug(items: dict[str, dict[str, Any]], staged_members: list[str]) -> str:
+    """Suggested canonical id for a CREATE/COLLAPSE cluster — a NAME, not summary prose.
+
+    Prefer the members' aliases: most-shared across members first (the name that caused the
+    union), then earliest list position (aliases[0] is the primary name by capture convention).
+    Slugifying summary text produced noise like "connector-component" for an entity whose name
+    was "connector" (E2E 2026-07-12, finding G8). Promote still mints the real slug; this is
+    only the suggestion the reconcile step surfaces.
+    """
+    tally: dict[str, int] = {}
+    first_pos: dict[str, int] = {}
+    surface: dict[str, str] = {}
+    for m in staged_members:
+        for pos, al in enumerate(items[m]["aliases"]):
+            k = al.strip().lower()
+            if not k:
+                continue
+            tally[k] = tally.get(k, 0) + 1
+            first_pos[k] = min(first_pos.get(k, pos), pos)
+            surface.setdefault(k, al.strip())
+    for k in sorted(tally, key=lambda k: (-tally[k], first_pos[k], len(k), k)):
+        slug = mnx_common.slugify(surface[k])
+        if slug:
+            return slug
     best = max(staged_members, key=lambda m: len(items[m]["summary"]))
     return mnx_common.slugify(items[best]["summary"][:60]) or mnx_common.slugify(best)
 

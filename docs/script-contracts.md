@@ -486,7 +486,9 @@ score_pair(a, b) -> float   # 0.4·alias/name token-Jaccard + 0.3·summary sim +
 - **Block:** `mnx_simindex.pairs(graph, with_atoms=atoms, intra=True)` over {staged ∪ graph pages}.
 - **Split:** `≥match` → same entity · `[possible, match)` → HITL band · `<possible` → distinct.
 - **Cluster:** union-find over `≥match` pairs; `canonical` = longest existing graph-id, else the
-  best staged summary's slug; UNION all aliases.
+  members' most-shared alias (tie: earliest list position — aliases[0] is the primary name), falling
+  back to the best staged summary's slug only when no alias slugifies (G8: summary prose made noise
+  like "connector-component"); UNION all aliases.
 - **Dispose:** graph member in cluster → MERGE (target = that id); all-staged, >1 → COLLAPSE; lone staged → CREATE.
 CLI: `resolve --graph r --atoms staged.json [--team t] [--match 0.85] [--possible 0.60]`.
 **Invariants:** pure proposer (writes nothing, never mutates the graph); one entity → one node (intra-batch
