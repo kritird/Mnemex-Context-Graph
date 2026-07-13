@@ -207,6 +207,13 @@ def _is_muted(session_id: str) -> bool:
         return False
 
 
+def core_is_muted(session_id: str) -> bool:
+    """Host-neutral mute probe (plan v2 §5.2): the MCP server (and any other non-Claude
+    adapter) checks this before every tool so a session opt-out silences ALL surfaces,
+    not just the Claude hooks. Never raises."""
+    return _is_muted(session_id)
+
+
 def _consent_marker(session_id: str) -> Path:
     """Per-session marker set when the user AGREES to Mnemex for this session (opt-in).
 
