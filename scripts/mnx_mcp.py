@@ -3,8 +3,9 @@
 One stdio server, spawned by the host agent, dead with the session — no port, no daemon.
 Every tool is a thin shim over an importable engine function (in-process, no subprocess
 fan-out); no logic lives here beyond schema validation, the session guards, and the
-path-confinement check. Commit 1b adds the binding/health surface (bind_status, status,
-doctor_check, doctor_fix, init_graph); read tools arrive in 1c, capture in 1d.
+path-confinement check. Commit 1b added the binding/health surface (bind_status, status,
+doctor_check, doctor_fix, init_graph); commit 1c adds the read surface (read_frontier,
+read_cluster, read_nodes, record_usage); capture tools arrive in 1d.
 
 Session-level contracts implemented here (§5.2):
 
@@ -52,6 +53,9 @@ import mnx_common
 import mnx_doctor
 import mnx_hooks
 import mnx_init
+import mnx_read
+import mnx_resolve
+import mnx_stamp
 import mnx_status
 
 # Soft SDK import: the engine (and the packaging bridge, which imports every mnx_* module)
@@ -311,8 +315,75 @@ def _init_graph(remote: Optional[str] = None, path: Optional[str] = None,
         raise ToolError(ie.code, str(ie), ie.action) from ie
 
 
+# --- tool bodies (Phase 1 commit 1c: read) ------------------------------------------
+#
+# Deterministic mechanics only (mnx_read.py, §6.1) — routing (which team/cluster matches
+# the request), the stop-early tier judgment, and disposing loaded bodies in the usage
+# manifest all stay host/model judgment (the mnx-read SKILL / procedure prompt).
+
+@tool_guard()
+def _read_frontier(binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """Org head + team heads (descriptions + child cluster descriptions), plus the
+    graph-wide consolidation-overdue warning. Never tier rows — call read_cluster next."""
+    return mnx_read.frontier(binding.graph_root(), mnx_common.now_utc())
+
+
+@tool_guard()
+def _read_cluster(cluster: str, tiers: Optional[list[str]] = None,
+                  binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """A cluster's Hot/Warm/Cold tier tables (`stale` flagged per row) + the staged-capture
+    overlay for that cluster's domain. `cluster` is confined to the resolved graph root."""
+    candidate = Path(cluster)
+    if not candidate.is_absolute():
+        candidate = Path(binding.graph_root()) / candidate
+    confined = confine(candidate, allowed_roots(binding))
+    try:
+        return mnx_read.scan(confined, mnx_common.now_utc(), tiers=tiers, binding=binding)
+    except ValueError as ve:
+        raise ToolError("not-a-cluster", str(ve),
+                        "call read_frontier for valid cluster paths") from ve
+
+
+@tool_guard()
+def _read_nodes(ids: list[str], max_bytes: Optional[int] = None,
+                binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """Node bodies for `ids` + each node's governed-by pattern companions, budget-capped.
+    Refuses `stg-` ids — those bodies already came from read_cluster's overlay."""
+    return mnx_read.expand(ids, binding.graph_root(), max_bytes)
+
+
+@tool_guard()
+def _record_usage(manifest: list[dict[str, Any]],
+                  binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """Append one usage stamp per manifest entry against its node's home-cluster registry.
+    `traversed` entries are accepted and silently ignored (traversed boost = 0). Remote
+    graphs flush the spill immediately — there is no Stop hook to batch it on MCP hosts."""
+    root = str(binding.graph_root())
+    stamped: list[dict[str, Any]] = []
+    ignored: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for entry in manifest:
+        nid = entry.get("id")
+        role = entry.get("role", "contributed")
+        if role == "traversed":
+            ignored.append({"id": nid, "role": role})
+            continue
+        path = mnx_resolve.resolve(nid, root)
+        if not path:
+            errors.append({"id": nid, "message": "unknown node id"})
+            continue
+        weight = entry.get("weight")
+        res = mnx_stamp.append(str(Path(path).parent), nid, role,
+                               float(weight) if weight is not None else 1.0)
+        stamped.append({"id": nid, "role": role, **res})
+    out: dict[str, Any] = {"stamped": stamped, "ignored": ignored, "errors": errors}
+    if stamped and binding.kind() == "git-remote":
+        out["flush"] = mnx_stamp.flush()
+    return out
+
+
 def register_tools(server: "FastMCP") -> None:
-    """Register the Phase-1 binding/health surface. Read tools (1c) and capture (1d) follow."""
+    """Register the Phase-1 binding/health + read surface. Capture tools (1d) follow."""
 
     @server.tool(name="bind_status",
                  description="Report which Mnemex graph is resolved for this project/user, the "
@@ -348,6 +419,41 @@ def register_tools(server: "FastMCP") -> None:
                    team: str = mnx_init.DEFAULT_TEAM, org: Optional[str] = None) -> dict[str, Any]:
         return _init_graph(remote=remote, path=path, team=team, org=org)
 
+    @server.tool(name="read_frontier",
+                 description="Org head + team heads (one-line descriptions + child cluster "
+                             "descriptions), plus the graph-wide consolidation-overdue warning. "
+                             "Route by matching descriptions to the request, then call "
+                             "read_cluster on the chosen cluster path(s). Read-only.")
+    def read_frontier() -> dict[str, Any]:
+        return _read_frontier()
+
+    @server.tool(name="read_cluster",
+                 description="A cluster's Hot/Warm/Cold tier tables (each row flags `stale` when "
+                             "its freshness horizon has passed) plus the staged-capture overlay "
+                             "for that cluster's domain (staged/unpromoted, newest-first — newer "
+                             "than the graph, never body-merge a contradiction, flag it instead). "
+                             "Pass tiers=['hot'] first and widen to warm/cold only if "
+                             "insufficient. Read-only.")
+    def read_cluster(cluster: str, tiers: Optional[list[str]] = None) -> dict[str, Any]:
+        return _read_cluster(cluster, tiers)
+
+    @server.tool(name="read_nodes",
+                 description="Node bodies for `ids`, plus each node's governed-by pattern "
+                             "companions, budget-capped by max_bytes. Refuses stg- ids (those "
+                             "bodies already came from read_cluster's overlay). Load only the "
+                             "ids you actually plan to use in the answer.")
+    def read_nodes(ids: list[str], max_bytes: Optional[int] = None) -> dict[str, Any]:
+        return _read_nodes(ids, max_bytes)
+
+    @server.tool(name="record_usage",
+                 description="Append one usage stamp per manifest entry "
+                             "{id, role: contributed|consulted|traversed, weight?} against each "
+                             "node's home-cluster registry. traversed entries are accepted and "
+                             "ignored. Call once, at the end of the task, for every node body "
+                             "you loaded via read_nodes.")
+    def record_usage(manifest: list[dict[str, Any]]) -> dict[str, Any]:
+        return _record_usage(manifest)
+
 
 # --- the server --------------------------------------------------------------------
 
@@ -368,7 +474,7 @@ def sdk_available() -> bool:
 def create_server() -> "FastMCP":
     """Build the FastMCP stdio server with the currently-shipped tools.
 
-    Phase 1 registers binding/health (1b); read (1c) and capture (1d) tools follow."""
+    Phase 1 registers binding/health (1b) and read (1c); capture (1d) tools follow."""
     if not sdk_available():
         raise RuntimeError(_sdk_missing_message())
     server = FastMCP(name=SERVER_NAME, instructions=_INSTRUCTIONS)

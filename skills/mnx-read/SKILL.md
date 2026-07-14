@@ -11,10 +11,10 @@ is appending usage stamps to a registry.
 
 Background: `docs/rationale-and-concepts.md`, `docs/architecture.md`,
 `docs/staging-and-promotion.md` (the staged overlay). Helpers you call:
-`scripts/mnx_binding.py` (locate the graph), `scripts/mnx_compact.py` (overdue check, registry-tail
-fold), `scripts/mnx_resolve.py` (id→path), `scripts/mnx_decay.py` (true current score when labels are stale),
-`scripts/mnx_stage.py` (capture-staging overlay — local, un-promoted atoms),
-`scripts/mnx_stamp.py` (durable, auto-flushed usage stamps).
+`scripts/mnx_binding.py` (locate the graph), `scripts/mnx_read.py` (org/team routing + overdue
+check, tier scan + staged overlay + stale flags, id→body expansion — the mechanical frontier,
+shared with the MCP `read_*` tools), `scripts/mnx_decay.py` (true current score when labels are
+stale), `scripts/mnx_stamp.py` (durable, auto-flushed usage stamps).
 
 ## Preflight — locate the graph (always first)
 Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_binding.py" status`.
@@ -29,68 +29,75 @@ Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_binding.py" status`.
 
 ## Procedure
 
-### 1. Overdue / config-drift check (warn only)
-Run `mnx_compact.py overdue`. If compaction is overdue or `λ`/`config_version` has drifted, tell the
-user in one line: *"Knowledge maintenance is N days overdue — run `/mnemex:mnx-promote`."* (Consolidation
-is the back half of promote now; there is no standalone gc.) You may append one `__maintenance-due__`
-marker line to the nearest registry. **Do not compact. Do not consolidate. Do not run promote.**
-
-### 2. Route (chunk-1 reads only)
-- Read the org `index.md` head → choose the team(s) whose description matches the request.
-- Read each team `index.md` head → choose the domain cluster(s).
-Use ranged reads; do not load whole index files. Routing is structural — match on the one-line
-descriptions and the node `summary`/`aliases`, not on guesswork.
-
-### 3. Scan tiers in order, stop early
-For each chosen cluster:
-- Read **Hot** (chunk 1). Often enough — stop if it answers the request.
-- Read **Warm** (chunk 2) only if Hot is insufficient.
-- Read **Cold** (chunk 3+) only on a deliberate deep search, or when the request clearly concerns a
-  dormant concept (alias/domain overlap with a cold entry).
-If you need a node's *true current* score (tier labels are only as fresh as the last gc), fold the
-registry tail with `mnx_decay.score` rather than trusting the stale label.
-
-### 3b. Overlay the capture staging tier (local, un-promoted)
-For every routed cluster, also pull the **staged** atoms — knowledge captured this/earlier sessions but
-not yet promoted into the graph:
-
+### 1. Frontier — overdue check + route, in one call
+Run:
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stage.py" overlay --domain "<routed-domain(s), ;-separated>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_read.py" frontier <graph_root>
 ```
+This returns `overdue` (the graph-wide consolidation-due signal), `org_head.description`, and each
+team's `description` + its cluster list (`{cluster, path, description}`) — chunk-1-equivalent: no tier
+rows, just what routing needs.
+- **Overdue, warn only:** if `overdue.due` is true (or a team's `config_drift` is true), tell the user
+  in one line: *"Knowledge maintenance is N days overdue — run `/mnemex:mnx-promote`."* (Consolidation
+  is the back half of promote now; there is no standalone gc.) **Do not compact. Do not consolidate.
+  Do not run promote.**
+- **Route (judgment, not the script's job):** choose the team(s) whose `description` matches the
+  request, then the cluster(s) within it whose `description` matches — structural matching on the
+  one-line descriptions and node `summary`/`aliases`, not guesswork.
 
-Overlay rules (decision #10):
-- **Newest-wins.** Staged atoms are returned newest-first; a staged atom is more recent than the
-  graph node it concerns, so prefer it when both speak to the same point.
-- **Mark provenance.** Anything you use from the overlay is **`staged/unpromoted`** — say so in the
-  answer (it has not been reconciled or peer-reviewed into the shared graph yet).
+### 2. Scan tiers in order, stop early
+For each chosen cluster (`path` from step 1), run:
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_read.py" scan <cluster-path> --tiers hot
+```
+This returns the cluster's `tiers.hot` table (id·summary·aliases·strength·stale_after, each row
+already carrying a computed `stale` boolean), a `stale` cue list, and the staged-capture `overlay`
+for that cluster's domain — all three in one call.
+- **Stop early.** Hot is often enough — stop if it answers the request. Only if insufficient,
+  re-run with `--tiers hot,warm`, and only on a deliberate deep search (or when the request clearly
+  concerns a dormant concept — alias/domain overlap with a cold entry) widen to
+  `--tiers hot,warm,cold`.
+- If you need a node's *true current* score (tier labels are only as fresh as the last gc), fold the
+  registry tail with `mnx_decay.score` rather than trusting the stale label.
+
+**Overlay rules** (decision #10) for the `overlay.atoms` in the response — staged atoms captured
+this/earlier session but not yet promoted:
+- **Newest-wins.** Returned newest-first; a staged atom is more recent than the graph node it
+  concerns, so prefer it when both speak to the same point.
+- **Mark provenance.** Anything you use from the overlay carries `state: "staged/unpromoted"` —
+  say so in the answer (it has not been reconciled or peer-reviewed into the shared graph yet).
 - **Flag contradictions, never resolve them.** If a staged atom contradicts a graph node, surface
   *both* and flag the conflict; do **not** body-merge them and do **not** pick a winner silently —
   reconciliation is promote's job.
 - **Never stamp, never give a real id.** Staged atoms carry provisional `stg-…` ids and are **not**
   usage-stamped (only real graph nodes are). Do not add them to the usage manifest below.
-- Routing stays correct between consolidations via the registry tail-fold (step 3) — the overlay is
-  additive, not a substitute for reading the graph tiers.
+- Routing stays correct between consolidations via the registry tail-fold (step 2, `mnx_decay.score`)
+  — the overlay is additive, not a substitute for reading the graph tiers.
 
-### 3c. Freshness check — signal stale knowledge (Freshness & Revalidation)
-Freshness is a **separate axis from heat**: an atom can be `hot` yet `stale`. Each index row carries a
-precomputed **`stale_after`** column. For every atom you bring into the answer, if `stale_after` is a real
-timestamp (not `—`) and it is **in the past** (`now > stale_after`), the atom is **stale** — its content
-has not been re-confirmed within its revalidation horizon.
-- **Emit a refresh cue** in your answer for each stale atom, once per session per atom: *"⏳ `<id>` was
-  last verified <N>d ago (horizon passed <stale_after>) — I'll re-derive it from source before relying on
-  it."* Then actually re-check it against its source as part of the task.
-- A `—` in `stale_after` means the atom is **timeless** (or dead) — never cue it.
-- This is a **signal only**. Do not rewrite the node here. Acting on the outcome is step 6 (still-true) or
-  a follow-up `mnx-capture` (changed) / promote (obsolete). See the three outcomes in Freshness & Revalidation §6.
+**Freshness rule** (Freshness & Revalidation) for any row where `stale` is `true` in the response —
+freshness is a **separate axis from heat**: a node can be `hot` yet `stale`. For every such node you
+bring into the answer:
+- **Emit a refresh cue** in your answer, once per session per atom: *"⏳ `<id>` was last verified <N>d
+  ago (horizon passed <stale_after>) — I'll re-derive it from source before relying on it."* Then
+  actually re-check it against its source as part of the task.
+- `stale: false` (a `—` `stale_after`) means the atom is **timeless** (or dead) — never cue it.
+- This is a **signal only**. Do not rewrite the node here. Acting on the outcome is step 5 (still-true)
+  or a follow-up `mnx-capture` (changed) / promote (obsolete). See the three outcomes in Freshness &
+  Revalidation §6.
 
-### 4. Expand only on commit
-Resolve candidate ids to paths with `mnx_resolve.resolve` (local index for intra-cluster, team
-`cross-links.md` for cross-cluster). Load **only** the node bodies you decide to use. When following
-edges, stay within a frontier budget (a small max number of nodes / tokens per hop) — this is beam
-search, not "load every neighbor". Loading a domain node, also pull its `governed-by` pattern nodes so
-you get the *what* and the *how* together.
+### 3. Expand only on commit
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_read.py" expand <id1,id2,...> --scope <graph_root> \
+  [--max-bytes N]
+```
+Resolves each id to its node body and, for every domain node, its `governed-by` pattern
+companion(s) — so you get the *what* and the *how* together in one call. Pass **only** the ids you
+decide to use — this is beam search, not "load every neighbor": choosing which ids to pass (staying
+within a small frontier of nodes/tokens per hop) is your judgment, not the script's. `--max-bytes`
+caps the total but never starves the first id, so a lopsided budget still returns something. The
+tool refuses `stg-…` ids outright (those bodies already came from step 2's overlay).
 
-### 5. Emit the usage manifest (the gate)
+### 4. Emit the usage manifest (the gate)
 At the **end** of the task, output a manifest — one entry per node **whose body you loaded**:
 
 ```
@@ -106,7 +113,7 @@ Rules:
 - `contributed` = materially shaped the output. `consulted` = informed reasoning, not in the output.
   `traversed` = routed through, not relied on.
 
-### 6. Stamp (append-only, auto-flushed)
+### 5. Stamp (append-only, auto-flushed)
 For each `contributed`/`consulted` node, record one usage stamp against that node's **home-cluster**
 registry (a cross-cluster use stamps the foreign cluster, not the one you started in):
 
@@ -115,7 +122,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stamp.py" append \
   --cluster <home-cluster-path> --id <node-id> --role <contributed|consulted> [--weight w]
 ```
 
-If you re-checked a **stale** atom (step 3c) and confirmed it is **still correct**, also append one
+If you re-checked a **stale** atom (step 2) and confirmed it is **still correct**, also append one
 `revalidated` stamp for it (weight `0`) — this advances its freshness clock at the next consolidation
 without touching heat:
 
