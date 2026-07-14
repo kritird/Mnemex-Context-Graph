@@ -3,8 +3,8 @@
 One stdio server, spawned by the host agent, dead with the session — no port, no daemon.
 Every tool is a thin shim over an importable engine function (in-process, no subprocess
 fan-out); no logic lives here beyond schema validation, the session guards, and the
-path-confinement check. Commit 1a ships the scaffolding only: the server starts, lists
-zero tools, and exits cleanly. Tools arrive in 1b (binding/health), 1c (read), 1d (capture).
+path-confinement check. Commit 1b adds the binding/health surface (bind_status, status,
+doctor_check, doctor_fix, init_graph); read tools arrive in 1c, capture in 1d.
 
 Session-level contracts implemented here (§5.2):
 
@@ -49,7 +49,10 @@ from typing import Any, Callable, Optional
 
 import mnx_binding
 import mnx_common
+import mnx_doctor
 import mnx_hooks
+import mnx_init
+import mnx_status
 
 # Soft SDK import: the engine (and the packaging bridge, which imports every mnx_* module)
 # must work on 3.9 / without the [mcp] extra. Only building/running the server needs it.
@@ -252,6 +255,100 @@ def tool_guard(sync_first: bool = True) -> Callable:
     return deco
 
 
+# --- tool bodies (Phase 1 commit 1b: binding / health) ------------------------------
+#
+# Each body is a plain function returning a payload dict; the guard wraps it in the
+# {ok,...}/{ok:false,error} envelope and injects binding=/sync= for graph-touching tools.
+# The MCP-facing wrappers (registered on the server) expose ONLY the user-facing params —
+# binding/sync never leak into a tool's public schema.
+
+@tool_guard()
+def _bind_status(binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """Which graph resolved, how, and whether the clone is present + has unpushed work."""
+    root = Path(binding.graph_root())
+    present = mnx_binding._is_git_repo(root) if binding.remote else root.is_dir()
+    payload: dict[str, Any] = {**binding.to_dict(), "clone_present": present}
+    if present and binding.remote:
+        try:  # surface a committed-but-unpushed promote so the host can offer retry_push
+            payload.update(mnx_binding.unpushed_state(binding))
+        except Exception:
+            pass
+    return payload
+
+
+@tool_guard()
+def _status(binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """The full at-a-glance snapshot: tiers per team, staged/held counts, pending stamps, health."""
+    return mnx_status.status()
+
+
+@tool_guard()
+def _doctor_check(binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """Read-only invariant suite over the resolved graph. Never mutates."""
+    return mnx_doctor.check(binding.graph_root())
+
+
+@tool_guard()
+def _doctor_fix(confirm: bool = False, binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """Regenerate derived files (indexes, cross-links, phonebook) from node truth. Mutating —
+    refuses without ``confirm`` so a stray call can never rewrite the graph."""
+    if not confirm:
+        raise ToolError("confirm-required",
+                        "doctor_fix rewrites derived files; it needs explicit confirmation.",
+                        "call doctor_fix again with confirm=true")
+    return mnx_doctor.fix(binding.graph_root())
+
+
+@tool_guard(sync_first=False)
+def _init_graph(remote: Optional[str] = None, path: Optional[str] = None,
+                team: str = mnx_init.DEFAULT_TEAM, org: Optional[str] = None) -> dict[str, Any]:
+    """Scaffold a brand-new graph (the one tool that ESTABLISHES a root, so it does not
+    sync-first an existing binding). Probes a remote read-only before touching it, installs
+    the merge driver, stamps config, and doctor-checks — a fresh graph is clean on day one."""
+    try:
+        return mnx_init.init_graph(remote=remote, path=path, team=team, org=org)
+    except mnx_init._InitError as ie:
+        raise ToolError(ie.code, str(ie), ie.action) from ie
+
+
+def register_tools(server: "FastMCP") -> None:
+    """Register the Phase-1 binding/health surface. Read tools (1c) and capture (1d) follow."""
+
+    @server.tool(name="bind_status",
+                 description="Report which Mnemex graph is resolved for this project/user, the "
+                             "resolution source, the graph root, whether the clone is present, "
+                             "and any committed-but-unpushed promote. Read-only.")
+    def bind_status() -> dict[str, Any]:
+        return _bind_status()
+
+    @server.tool(name="status",
+                 description="At-a-glance memory status: per-team node/tier counts, staged and "
+                             "held capture counts, pending usage stamps, and a health summary. "
+                             "Read-only.")
+    def status() -> dict[str, Any]:
+        return _status()
+
+    @server.tool(name="doctor_check",
+                 description="Run the graph invariant suite and return findings (errors/warnings/"
+                             "info). Read-only — never repairs.")
+    def doctor_check() -> dict[str, Any]:
+        return _doctor_check()
+
+    @server.tool(name="doctor_fix",
+                 description="Regenerate derived files (indexes, cross-links, phonebook) from node "
+                             "truth. MUTATING: pass confirm=true to proceed.")
+    def doctor_fix(confirm: bool = False) -> dict[str, Any]:
+        return _doctor_fix(confirm=confirm)
+
+    @server.tool(name="init_graph",
+                 description="Scaffold a brand-new Mnemex graph and leave it doctor-clean. Give "
+                             "exactly one of path=<folder> or remote=<git-url>; a non-empty remote "
+                             "is refused (bind to it instead). Optional team=/org= names.")
+    def init_graph(path: Optional[str] = None, remote: Optional[str] = None,
+                   team: str = mnx_init.DEFAULT_TEAM, org: Optional[str] = None) -> dict[str, Any]:
+        return _init_graph(remote=remote, path=path, team=team, org=org)
+
+
 # --- the server --------------------------------------------------------------------
 
 def _sdk_missing_message() -> str:
@@ -269,13 +366,16 @@ def sdk_available() -> bool:
 
 
 def create_server() -> "FastMCP":
-    """Build the FastMCP stdio server. Commit 1a registers no tools/prompts/resources yet."""
+    """Build the FastMCP stdio server with the currently-shipped tools.
+
+    Phase 1 registers binding/health (1b); read (1c) and capture (1d) tools follow."""
     if not sdk_available():
         raise RuntimeError(_sdk_missing_message())
     server = FastMCP(name=SERVER_NAME, instructions=_INSTRUCTIONS)
     # FastMCP doesn't expose a version parameter; the low-level server does, and without
     # this the host would see the SDK's version instead of ours in initialize.serverInfo.
     server._mcp_server.version = engine_version()
+    register_tools(server)
     return server
 
 
