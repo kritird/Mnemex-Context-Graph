@@ -151,8 +151,17 @@ def validate_plan(plan: dict[str, Any], batch_pids: set[str], graph_root: str) -
                 errors.append(f"{pid}: merge id must not be a stg- id")
             if not d.get("cluster"):
                 errors.append(f"{pid}: merge requires cluster")
-            if not isinstance(d.get("changes"), dict):
+            changes = d.get("changes")
+            if not isinstance(changes, dict):
                 errors.append(f"{pid}: merge requires changes")
+            else:
+                unknown = set(changes) - mnx_node.MERGE_CHANGE_KEYS
+                if unknown:
+                    errors.append(
+                        f"{pid}: merge changes has unrecognized field(s) {sorted(unknown)} "
+                        f"(recognized: {sorted(mnx_node.MERGE_CHANGE_KEYS)}; aliases/edges/"
+                        "references/mentions/body REPLACE the existing value, they do not "
+                        "append — include the entries you want kept)")
         elif op == "resurrect":
             nid = d.get("id")
             if not nid:
@@ -168,7 +177,11 @@ def validate_plan(plan: dict[str, Any], batch_pids: set[str], graph_root: str) -
             if not d.get("reason"):
                 errors.append(f"{pid}: hold requires reason")
 
-    for i, split in enumerate(plan.get("splits", []) or []):
+    splits = plan.get("splits")
+    if splits is not None and not isinstance(splits, list):
+        errors.append("splits must be a list (or omitted)")
+        splits = []
+    for i, split in enumerate(splits or []):
         pid = split.get("pid") if isinstance(split, dict) else None
         if not pid:
             errors.append(f"splits[{i}] missing pid")
@@ -184,6 +197,29 @@ def validate_plan(plan: dict[str, Any], batch_pids: set[str], graph_root: str) -
             fields = piece.get("fields") if isinstance(piece, dict) else None
             if not isinstance(fields, dict) or not str(fields.get("title") or "").strip():
                 errors.append(f"{pid}: splits pieces[{j}] requires fields.title")
+
+    # `apply()` dereferences both of these with `.get(...)` unconditionally (mnx_promote.py
+    # ~410-417) — a wrong JSON type here must fail validation cleanly, not raise a raw
+    # AttributeError from inside apply() after the lock is already held.
+    links = plan.get("links")
+    if links is not None and not isinstance(links, dict):
+        errors.append("links must be an object (or omitted)")
+    elif isinstance(links, dict):
+        cs = links.get("confirmed_suggestions")
+        if cs is not None and not isinstance(cs, list):
+            errors.append("links.confirmed_suggestions must be a list")
+        else:
+            for i, item in enumerate(cs or []):
+                if not isinstance(item, dict) or not item.get("src") or not item.get("dst"):
+                    errors.append(f"links.confirmed_suggestions[{i}] requires src and dst")
+
+    consolidate = plan.get("consolidate")
+    if consolidate is not None and not isinstance(consolidate, dict):
+        errors.append("consolidate must be an object (or omitted)")
+    elif isinstance(consolidate, dict):
+        deaths = consolidate.get("approved_deaths")
+        if deaths is not None and not isinstance(deaths, list):
+            errors.append("consolidate.approved_deaths must be a list")
 
     missing = batch_pids - seen
     if missing:
@@ -297,9 +333,21 @@ def context(binding: Optional["mnx_binding.Binding"] = None, team: Optional[str]
 
     near_matches: dict[str, Any] = {}
     for a in batch:
-        text = f"{a.get('summary', '')} {a.get('body', '')}".strip()
+        # Query text must mirror mnx_simindex._surface's indexed shape (summary + aliases) —
+        # mixing in `body` was diluting Jaccard similarity against every candidate (indexed
+        # items are short; a body-heavy query adds tokens no node has, systematically pushing
+        # even a near-verbatim restatement below threshold) and silently produced empty
+        # near_matches for every atom. threshold=0.3 (below mnx_simindex.query's 0.4 default):
+        # this call is explicitly HITL-only ("fuzzy candidates only ... never an auto-edit"),
+        # so a false positive just costs the host one extra candidate to reject, while missing
+        # a true near-duplicate/merge/resurrect target silently defeats the whole point of the
+        # call. Real merge/resurrect pairs in practice score 0.37-0.44 with only 64
+        # permutations' worth of estimator noise, i.e. routinely straddle the stricter 0.4 —
+        # not a fluke of any one example.
+        text = f"{a.get('summary', '')} {mnx_common.aliases_to_index(a.get('aliases'))}".strip()
         try:
-            near_matches[a["provisional_id"]] = mnx_simindex.query(text, team_path)["candidates"]
+            near_matches[a["provisional_id"]] = mnx_simindex.query(
+                text, team_path, threshold=0.3)["candidates"]
         except Exception:
             near_matches[a["provisional_id"]] = []
 
@@ -357,10 +405,38 @@ def apply(plan: dict[str, Any], approved: bool = True,
         if t:
             touched_teams.add(t)
 
+    noted_ids: set[str] = set()
+
     def _note(cluster: Path, nid: str, disposition: str) -> None:
+        if nid in noted_ids:
+            return
+        noted_ids.add(nid)
         node = mnx_common.parse_node(cluster / f"{nid}.md")
         notes.append({"id": nid, "cluster_path": str(cluster), "body": node.get("_body", ""),
                      "aliases": node.get("aliases", []), "disposition": disposition})
+
+    def _repoint_referrers(old_id: str) -> None:
+        """Pre-existing nodes (outside this batch) whose `edges:` mirror still points at
+        `old_id` — found so their mirror gets re-derived in the SAME plan_links/apply_links
+        pass below. `mnx_phonebook.resolve` already forwards a superseded id to its live
+        successor (F8), but that forwarding only takes effect when a note's body is
+        re-parsed; a referrer untouched by this batch keeps a stale mirror and fails the
+        doctor gate (inv 2, live edge -> tombstoned node) forever otherwise. Disposition
+        "repoint" is deliberately not in mnx_mesh._NEW_DISPOSITIONS, so this only triggers
+        outbound re-resolution (Phase L1), not a spurious backfill pass (Phase L2) for a
+        node that isn't actually new."""
+        for cluster in mnx_common.iter_clusters(Path(team_path)):
+            for nf in mnx_common.iter_node_files(cluster):
+                try:
+                    node = mnx_common.parse_node(nf)
+                except Exception:
+                    continue
+                if node.get("status") == "dead" or node.get("id") in noted_ids:
+                    continue
+                if any(isinstance(e, dict) and e.get("to") == old_id
+                       for e in (node.get("edges") or [])):
+                    _touch(cluster)
+                    _note(cluster, node["id"], "repoint")
 
     for d in plan.get("dispositions", []):
         pid, op = d["pid"], d["op"]
@@ -381,6 +457,7 @@ def apply(plan: dict[str, Any], approved: bool = True,
             res = mnx_node.supersede(d["old_id"], cluster, d["fields"])
             _touch(cluster)
             _note(cluster, res["new_id"], "create")
+            _repoint_referrers(d["old_id"])
             disposition_summary.append({"pid": pid, "op": op, "old_id": d["old_id"], "new_id": res["new_id"]})
         elif op == "resurrect":
             cluster = _cluster_path(graph_root, d["cluster"])

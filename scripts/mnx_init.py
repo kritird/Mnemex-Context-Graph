@@ -29,6 +29,7 @@ import mnx_binding
 import mnx_common
 import mnx_config
 import mnx_doctor
+import mnx_phonebook
 import mnx_regen
 
 DEFAULT_TEAM = "team-core"
@@ -112,6 +113,18 @@ def scaffold(root: str | Path, team: str = DEFAULT_TEAM,
     _write(f"{team}/index.md", _router_index(team, team_desc, []))
     _write(f"{team}/registry.md", _registry_header(team))
     _write(f"{team}/cross-links.md", _crosslinks_header(team))
+
+    # The org router just written above is a day-one placeholder in the wrong SHAPE for this
+    # file: every regen (mnx_doctor.fix, mnx_promote.apply, mnx_regen, mnx_compact) rewrites
+    # index.md as the coarse team/domains/summary TABLE via mnx_phonebook.regenerate_org —
+    # never the `> description` + `## Children` router shape `_router_index` just wrote. Left
+    # unreconciled, a graph that has never been promoted/doctor-fixed has an org index.md that
+    # `mnx_read.frontier` parses differently than a post-regen graph does. Normalize
+    # immediately so day-one and post-regen graphs are identical from the start — but only
+    # when THIS call actually created (not skipped) the org index, so scaffold stays
+    # non-destructive toward a pre-existing org whose index.md a human may have hand-edited.
+    if "index.md" in created:
+        mnx_phonebook.regenerate_org(str(root))
 
     return {"root": str(root), "org": org_name, "team": team,
             "created": created, "skipped": skipped}

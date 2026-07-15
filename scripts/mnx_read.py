@@ -59,14 +59,21 @@ def frontier(graph_root: str | Path, now: str) -> dict[str, Any]:
     cfg = mnx_config.load(str(root))
     overdue = mnx_compact.overdue(str(root), cfg, now)
 
+    # The org-level index.md is NOT a router index (`> description` + `## Children`, what
+    # `parse_index` expects) — it is the coarse team/domains/summary table that
+    # `mnx_phonebook.regenerate_org` writes (and every promote/doctor-fix regenerates it into
+    # that shape, even when `mnx_init.scaffold` wrote a router-shaped file on day one). Parse it
+    # with `parse_md_table`, matching `mnx_doctor`'s own org-directory check (inv 20).
     org_idx_path = root / mnx_common.INDEX_FILENAME
     org_head: dict[str, Any] = {}
     teams: list[dict[str, Any]] = []
     if org_idx_path.is_file():
-        org_idx = mnx_common.parse_index(org_idx_path)
-        org_head = {"description": org_idx.get("description", "")}
-        for child in org_idx.get("children", []):
-            team_name = _child_name(child)
+        org_rows = mnx_common.parse_md_table(org_idx_path.read_text(encoding="utf-8"))
+        org_head = {"description": "Organization knowledge graph — route to a team by its summary."}
+        for row in org_rows:
+            team_name = (row.get("team") or "").strip()
+            if not team_name:
+                continue
             team_dir = root / team_name
             team_idx_path = team_dir / mnx_common.INDEX_FILENAME
             if not team_idx_path.is_file():
@@ -83,7 +90,8 @@ def frontier(graph_root: str | Path, now: str) -> dict[str, Any]:
                 clusters.append({"cluster": cluster_name, "path": str(cluster_dir),
                                  "description": description})
             teams.append({"team": team_name, "path": str(team_dir),
-                         "description": team_idx.get("description", ""), "clusters": clusters})
+                         "description": team_idx.get("description", "") or row.get("summary", ""),
+                         "clusters": clusters})
 
     return {"graph_root": str(root), "overdue": overdue, "org_head": org_head, "teams": teams}
 

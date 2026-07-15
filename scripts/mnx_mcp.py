@@ -54,6 +54,7 @@ from typing import Any, Callable, Optional
 
 import mnx_binding
 import mnx_common
+import mnx_config
 import mnx_doctor
 import mnx_glean
 import mnx_hooks
@@ -414,14 +415,22 @@ def _capture_add(type: str = "domain", summary: str = "", aliases: Optional[list
     """Stage one atom. Idempotent by content hash (a re-capture of identical content is a
     no-op restage, not a duplicate). Refuses a NEW atom once the session batch is past the
     hard budget — the refusal message names both ways out (promote to drain, or drop/
-    discard-all to make room)."""
+    discard-all to make room). node_body_max_chars is a SOFT budget (not enforced by the
+    doctor gate) — a body over it is flagged in the result as `over_budget`; the host is
+    expected to split it into multiple linked atoms rather than stage one oversized body."""
     atom = {"type": type, "summary": summary, "aliases": aliases, "domain": domain,
             "trigger": trigger, "score": score, "urgent": urgent, "volatility": volatility,
             "provenance": provenance or {}, "body": body}
     try:
-        return mnx_stage.add(atom)
+        result = mnx_stage.add(atom)
     except ValueError as ve:
         raise ToolError("invalid-atom", str(ve), "fix the atom fields and retry") from ve
+    cap = int(mnx_config.load(binding.graph_root()).get("node_body_max_chars", 6000))
+    if len(body) > cap:
+        result["over_budget"] = {"chars": len(body), "cap": cap,
+                                 "note": "not enforced — split into multiple linked atoms "
+                                         "before promoting, or the body lands unsplit"}
+    return result
 
 
 @tool_guard()
@@ -458,6 +467,27 @@ def _glean_step(before: int, after: int, pass_no: int,
 # No `team` parameter is exposed — every tool uses the resolved binding's default_team,
 # matching the §5.3 catalog's `{}` param shape.
 
+_NO_TEAM_ACTION = (
+    "the binding has no default_team configured — this cannot be fixed from within a tool "
+    "call (the graph may have several teams and nothing here should guess which one). Ask "
+    "whoever set up this MCP server to set MNEMEX_DEFAULT_TEAM in the server's environment, "
+    "or add `default_team: <team-name>` to the project's .mnemex.md binding file. "
+    "bind_status's `default_team` field is null when this is the blocker."
+)
+
+
+def _map_promote_value_error(ve: ValueError, fallback_code: str, fallback_action: str) -> ToolError:
+    """Every mnx_promote entry point resolves the team via the same _resolve() helper, so any
+    of them can raise the same 'no default_team' ValueError — not just promote_begin. Route it
+    to one clear, correctly-actionable error regardless of which tool surfaced it, instead of
+    letting it get mismapped to that tool's OWN fallback code (e.g. promote_apply mapping it to
+    "call promote_begin first", which is not the actual fix)."""
+    msg = str(ve)
+    if "default_team" in msg:
+        return ToolError("no-team", msg, _NO_TEAM_ACTION)
+    return ToolError(fallback_code, msg, fallback_action)
+
+
 @tool_guard()
 def _promote_begin(binding: Any = None, sync: Any = None) -> dict[str, Any]:
     """Preflight (flush stamps, D7 unpushed guard, stranded-plan recovery) then acquire the
@@ -466,8 +496,7 @@ def _promote_begin(binding: Any = None, sync: Any = None) -> dict[str, Any]:
     try:
         return mnx_promote.begin(binding=binding)
     except ValueError as ve:
-        raise ToolError("no-team", str(ve),
-                        "configure a default_team for this binding, or run init_graph") from ve
+        raise _map_promote_value_error(ve, "no-team", _NO_TEAM_ACTION) from ve
 
 
 @tool_guard()
@@ -476,7 +505,10 @@ def _promote_context(pids: Optional[list[str]] = None, clusters: Optional[list[s
     """Everything the reconcile judgment needs in one call: the staged batch (optionally
     filtered), mnx_simindex near-match candidates per atom, routed cluster index rows, and
     a mnx_mesh link-plan preview."""
-    return mnx_promote.context(binding=binding, pids=pids, clusters=clusters)
+    try:
+        return mnx_promote.context(binding=binding, pids=pids, clusters=clusters)
+    except ValueError as ve:
+        raise _map_promote_value_error(ve, "no-team", _NO_TEAM_ACTION) from ve
 
 
 @tool_guard()
@@ -496,7 +528,7 @@ def _promote_apply(plan: dict[str, Any], approved: bool = False,
     try:
         return mnx_promote.apply(plan, approved=True, binding=binding)
     except ValueError as ve:
-        raise ToolError("no-lock", str(ve), "call promote_begin first") from ve
+        raise _map_promote_value_error(ve, "no-lock", "call promote_begin first") from ve
 
 
 @tool_guard()
@@ -506,14 +538,18 @@ def _promote_retry_push(binding: Any = None, sync: Any = None) -> dict[str, Any]
     try:
         return mnx_promote.retry_push(binding=binding)
     except ValueError as ve:
-        raise ToolError("no-pending-plan", str(ve),
-                        "nothing to retry; call promote_begin to start a new promote") from ve
+        raise _map_promote_value_error(
+            ve, "no-pending-plan",
+            "nothing to retry; call promote_begin to start a new promote") from ve
 
 
 @tool_guard()
 def _promote_abort(binding: Any = None, sync: Any = None) -> dict[str, Any]:
     """Release the team lock and drop any pending plan. Staging is left untouched."""
-    return mnx_promote.abort(binding=binding)
+    try:
+        return mnx_promote.abort(binding=binding)
+    except ValueError as ve:
+        raise _map_promote_value_error(ve, "no-team", _NO_TEAM_ACTION) from ve
 
 
 # --- tool bodies (Phase 2 commit 2b: held queue) -------------------------------------
@@ -549,7 +585,12 @@ def register_tools(server: "FastMCP") -> None:
     @server.tool(name="bind_status",
                  description="Report which Mnemex graph is resolved for this project/user, the "
                              "resolution source, the graph root, whether the clone is present, "
-                             "and any committed-but-unpushed promote. Read-only.")
+                             "and any committed-but-unpushed promote. Read-only. Check this "
+                             "before capturing/promoting on a multi-team graph: if "
+                             "`default_team` is null, every promote_* tool will refuse until "
+                             "the server's operator sets one (MNEMEX_DEFAULT_TEAM env var, or "
+                             "default_team: in the project's .mnemex.md) — not something fixable "
+                             "from a tool call.")
     def bind_status() -> dict[str, Any]:
         return _bind_status()
 
@@ -629,7 +670,12 @@ def register_tools(server: "FastMCP") -> None:
                              "provenance?, body}. Idempotent by content hash. Refuses a NEW "
                              "atom once the session batch is past the hard budget — the "
                              "refusal names both ways out (promote, or capture_drop/"
-                             "capture_discard_all).")
+                             "capture_discard_all). There is a soft per-atom body budget "
+                             "(node_body_max_chars, default 6000) — NOT enforced here or at "
+                             "promote time, so an oversized body is staged and later lands "
+                             "unsplit unless the host splits it into multiple linked atoms "
+                             "itself; the result carries `over_budget: {chars, cap}` when this "
+                             "applies.")
     def capture_add(type: str = "domain", summary: str = "", aliases: Optional[list[str]] = None,
                     domain: Optional[list[str]] = None, trigger: Optional[str] = None,
                     score: str = "later", urgent: bool = False, volatility: Any = "default",
@@ -688,7 +734,19 @@ def register_tools(server: "FastMCP") -> None:
                              "{plan_version: 1, dispositions: [{pid, op: create|merge|supersede|"
                              "resurrect|drop_dup|hold, ...op-specific fields}], splits?, links?, "
                              "consolidate?} — every staged pid from promote_begin's batch must "
-                             "get exactly one disposition.")
+                             "get exactly one disposition. op-specific fields: create/supersede "
+                             "need cluster + fields (fields.title required); supersede also "
+                             "needs old_id; merge needs id + cluster + changes (a dict — "
+                             "REPLACEMENT values, not additive, for any of summary/aliases/"
+                             "domain/confidence/references/mentions/edges/volatility/trigger/"
+                             "body; an unrecognized key is a validation error, not a silent "
+                             "no-op — to add an alias, pass the full new aliases list including "
+                             "the old ones); resurrect needs id + cluster; drop_dup needs "
+                             "dup_of; hold needs reason. `links.confirmed_suggestions` is "
+                             "[{src, dst}]; `consolidate` is {run: bool, approved_deaths: "
+                             "[id,...]} — both must be objects/omitted, not other JSON types. "
+                             "A pre-existing node's edges into a just-superseded id are "
+                             "repointed to the successor automatically — no plan field needed.")
     def promote_apply(plan: dict[str, Any], approved: bool = False) -> dict[str, Any]:
         return _promote_apply(plan, approved)
 

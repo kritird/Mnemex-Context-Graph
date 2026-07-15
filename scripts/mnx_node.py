@@ -187,11 +187,23 @@ def create(cluster: str | Path, fields: dict[str, Any]) -> dict[str, Any]:
     return {"action": "created", "id": nid, "path": str(path)}
 
 
+# The complete set of keys merge() reads from `changes` — single-sourced so callers (e.g.
+# mnx_promote.validate_plan) can reject an unrecognized key instead of silently dropping it.
+# `aliases`, `edges`, `references`, `mentions`, and `body` are full REPLACEMENTS, not additive
+# (there is no `_add`/`_append` convention) — a caller wanting to keep existing entries must
+# include them in the new value.
+MERGE_CHANGE_KEYS = frozenset({
+    "summary", "aliases", "domain", "confidence", "references", "mentions", "edges",
+    "volatility", "trigger", "body",
+})
+
+
 def merge(id: str, cluster: str | Path, changes: dict[str, Any],
           meaning_change: bool = False) -> dict[str, Any]:
     """Fold new knowledge into an existing node in place. Keeps id + created. verified=now always;
     updated=now ONLY on a meaning-change (a use/confirm is not a meaning change). Body preserved
-    verbatim unless `changes` supplies a new body."""
+    verbatim unless `changes` supplies a new body. `changes` fields are listed + documented in
+    MERGE_CHANGE_KEYS: aliases/edges/references/mentions/body REPLACE, they do not append."""
     fm, body, path = _load(cluster, id)
     now = mnx_common.now_utc()
     for key in ("summary", "aliases", "domain", "confidence", "references", "mentions", "edges"):
