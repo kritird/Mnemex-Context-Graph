@@ -1,0 +1,30 @@
+{
+  "name": "openmnemex",
+  "version": "0.1.0",
+  "description": "npx shim for OpenMnemex -- launches the Python engine (PyPI package `openmnemex`) via uv/pipx. Pure ergonomics, no logic. See https://github.com/kritird/OpenMnemex",
+  "license": "MIT",
+  "homepage": "https://github.com/kritird/OpenMnemex",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kritird/OpenMnemex.git"
+  },
+  "bin": {
+    "openmnemex": "bin/openmnemex.js",
+    "openmnemex-mcp": "bin/openmnemex-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "keywords": [
+    "agent-memory",
+    "llm-memory",
+    "mcp",
+    "context-graph",
+    "claude-code"
+  ]
+}

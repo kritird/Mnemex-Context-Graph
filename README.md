@@ -330,6 +330,10 @@ exactly the Mnemex entry/block and leaves everything else in the file untouched.
 > Not on PyPI yet — until then, `uvx --from git+https://github.com/kritird/OpenMnemex openmnemex
 > install --agent <agent> ...` runs it straight from this repo.
 
+JS-native users can skip `uv`/`pip` entirely once published: `npx openmnemex install --agent
+<agent> ...` and `npx openmnemex-mcp` are thin shims that exec the same PyPI package underneath
+(`integrations/npm/`, not yet published — same not-on-PyPI caveat above applies).
+
 ---
 
 ## 📚 Read the standard
