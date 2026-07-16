@@ -3,7 +3,8 @@
 ``openmnemex install --agent {claude-code,opencode,gemini-cli,codex,copilot,cursor}
 [--project|--user] [--uninstall] [--check] [--dry-run] [--yes] [--pin-graph]``
 
-Emits, per target agent: an MCP server entry (JSON or TOML) pointing at ``uvx openmnemex-mcp``,
+Emits, per target agent: an MCP server entry (JSON or TOML) pointing at
+``uvx --from 'openmnemex[mcp]' openmnemex-mcp``,
 plus (except claude-code, which already has the richer plugin path) a marker-delimited
 instruction-file block (§5.5) built from the SAME digests the MCP tool descriptions use
 (``mnx_procedures.render_digest``) — one prose source, no hand-retyped copy to drift (risk R3).
@@ -37,7 +38,13 @@ import mnx_common
 import mnx_procedures
 
 MCP_COMMAND = "uvx"
-MCP_ARGS = ["openmnemex-mcp"]
+# `uvx openmnemex-mcp` (bare) does NOT resolve: uv treats the argument as the PyPI package
+# name to install, and no such package exists (only `openmnemex` does, exposing this as one
+# of two console scripts). `--from` is required whenever the script name differs from the
+# package name (verified against the built wheel via `uv tool run`); the `[mcp]` extra is
+# required too, or the server starts with the SDK unavailable. Both confirmed empirically
+# 2026-07-16 — a plain `--from openmnemex` install pulls in openmnemex-mcp but not `mcp`/anyio.
+MCP_ARGS = ["--from", "openmnemex[mcp]", "openmnemex-mcp"]
 SERVER_KEY = "mnemex"
 
 MD_BEGIN = "<!-- openmnemex:begin (generated; `openmnemex install --agent X` updates this) -->"

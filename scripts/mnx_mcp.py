@@ -41,7 +41,8 @@ CLI:
     serve   — run the stdio server (default; blocks until the host disconnects)
     info    — server identity + SDK availability as JSON (never starts the server)
 
-Run: ``uvx openmnemex-mcp`` (packaged) or ``python3 scripts/mnx_mcp.py`` (checkout).
+Run: ``uvx --from 'openmnemex[mcp]' openmnemex-mcp`` (packaged) or ``python3 scripts/mnx_mcp.py``
+(checkout).
 """
 from __future__ import annotations
 
@@ -837,7 +838,7 @@ def _sdk_missing_message() -> str:
                 f"{sys.version_info.major}.{sys.version_info.minor}); the engine itself "
                 f"keeps working on 3.9 — only the MCP surface is gated.")
     return ("The 'mcp' SDK is not installed. Install the optional extra: "
-            "pip install 'openmnemex[mcp]'  (or run via: uvx openmnemex-mcp). "
+            "pip install 'openmnemex[mcp]'  (or run via: uvx --from 'openmnemex[mcp]' openmnemex-mcp). "
             f"Import error: {_MCP_IMPORT_ERROR}")
 
 
