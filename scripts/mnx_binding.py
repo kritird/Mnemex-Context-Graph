@@ -76,6 +76,11 @@ def graphs_cache_root() -> Path:
     return mnx_common.mnemex_home() / "graphs"
 
 
+def graphs_registry_path() -> Path:
+    """The append-only 'which graphs have I used' ledger — see registry helpers below."""
+    return mnx_common.mnemex_home() / "graphs.md"
+
+
 def staging_cache_root() -> Path:
     """Root for per-graph LOCAL side-stores (capture staging atoms + the read-stamp spill).
 
@@ -221,6 +226,107 @@ def graph_slug(binding: "Binding") -> str:
 
 def staging_path_for(binding: "Binding") -> Path:
     return staging_cache_root() / graph_slug(binding)
+
+
+# --- graph registry (discovery — onboarding plan Phase 4) --------------------
+#
+# Answers "which graphs do I have?" without a filesystem-wide scan. `<mnemex_home>/graphs.md`
+# is an append-only ledger (one line per graph, tab-separated so a local path containing
+# spaces never breaks parsing): slug, kind, name, location (path or remote), first-registered
+# timestamp. `register_graph` is called from `sync()` (the one chokepoint both the MCP session
+# guard and the SessionStart hook already funnel through — see mnx_hooks.core_session_start)
+# and from `mnx_init.init_graph`, so a graph is registered the moment it is actually used,
+# whether created via init or bound by hand via a project `.mnemex.md` / user config / env var.
+
+_REGISTRY_HEADER = (
+    "# mnemex graph registry (append-only — do not edit by hand)\n"
+    "# columns: slug\tkind\tname\tlocation\tfirst_registered(UTC ISO-8601)\n"
+)
+
+
+def _read_registry_rows(path: Path) -> list[dict[str, str]]:
+    """Parse graphs.md into rows. Missing file or a malformed line -> skipped, never raises."""
+    if not path.is_file():
+        return []
+    rows: list[dict[str, str]] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return []
+    for line in text.splitlines():
+        line = line.strip("\n")
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) != 5:
+            continue
+        rows.append({"slug": parts[0], "kind": parts[1], "name": parts[2],
+                     "location": parts[3], "last_used": parts[4]})
+    return rows
+
+
+def register_graph(binding: "Binding") -> dict[str, Any]:
+    """Best-effort: append `binding` to the graph registry if its slug isn't already listed.
+
+    Never raises — a registry-write failure (read-only home, disk full, …) must never break
+    the read/sync/init call it is riding along with. A no-op for an already-listed slug (the
+    registry is a discovery ledger, not a last-used tracker; Phase 5 can revisit ordering)."""
+    try:
+        path = graphs_registry_path()
+        slug = binding.slug()
+        if any(r["slug"] == slug for r in _read_registry_rows(path)):
+            return {"registered": False, "reason": "already-listed", "slug": slug}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        is_new_file = not path.is_file()
+        location = binding.remote or binding.graph_root()
+        row = "\t".join([slug, binding.kind(), binding.display_name(), location, _now_utc()])
+        with path.open("a", encoding="utf-8") as fh:
+            if is_new_file:
+                fh.write(_REGISTRY_HEADER)
+            fh.write(row + "\n")
+        return {"registered": True, "slug": slug}
+    except Exception as exc:
+        return {"registered": False, "error": str(exc)}
+
+
+def _read_origin_remote(repo: Path) -> Optional[str]:
+    r = _git(["remote", "get-url", "origin"], cwd=repo)
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _cache_scan_entries(known_slugs: set[str]) -> list[dict[str, str]]:
+    """Remote clones present under graphs_cache_root() but not yet in the registry — e.g. a
+    graph bound via .mnemex.md/env/user-config and sync'd before this phase shipped. Bounded to
+    this ONE known cache directory — never a filesystem-wide search for mnemex.config.md."""
+    root = graphs_cache_root()
+    if not root.is_dir():
+        return []
+    found = []
+    for entry in sorted(root.iterdir()):
+        if entry.name in known_slugs or not _is_git_repo(entry):
+            continue
+        remote = _read_origin_remote(entry)
+        name = Binding("cache-scan", remote=remote).display_name() if remote else entry.name
+        found.append({"slug": entry.name, "kind": "git-remote", "name": name,
+                      "location": remote or "", "last_used": ""})
+    return found
+
+
+def list_graphs() -> list[dict[str, Any]]:
+    """Every graph Mnemex knows about: the registry, unioned with a scan of the remote-clone
+    cache for entries the registry missed, each flagged `present` (its folder/clone currently
+    exists on disk). Read-only; safe to call with no graph bound. No filesystem-wide scan."""
+    rows = _read_registry_rows(graphs_registry_path())
+    rows += _cache_scan_entries({r["slug"] for r in rows})
+
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        if r["kind"] == "git-remote":
+            present = _is_git_repo(graphs_cache_root() / r["slug"])
+        else:
+            present = bool(r["location"]) and Path(r["location"]).is_dir()
+        out.append({**r, "present": present})
+    return sorted(out, key=lambda r: r["last_used"], reverse=True)
 
 
 def _binding_from(getter: Callable[[str], Any], source: str) -> Optional[Binding]:
@@ -435,6 +541,22 @@ def probe_remote(remote: str, timeout: float = 20.0) -> dict[str, Any]:
 # --- sync -------------------------------------------------------------------
 
 def sync(binding: Binding) -> dict[str, Any]:
+    """Make the graph ready for the session, then register it (best-effort, never raises).
+
+    This is the one chokepoint both the MCP session guard (`mnx_mcp.ensure_synced`) and the
+    Claude SessionStart hook (`mnx_hooks.core_session_start`) call before touching a graph, so
+    it is also where a graph earns its entry in the discovery registry (`register_graph`) —
+    covering graphs bound by hand (project `.mnemex.md` / env / user config), not just ones
+    created through `init_graph`. Skipped on `action == "error"`: a graph that failed to
+    materialize was not actually used this session.
+    """
+    result = _sync_impl(binding)
+    if result.get("action") != "error":
+        register_graph(binding)
+    return result
+
+
+def _sync_impl(binding: Binding) -> dict[str, Any]:
     """Make the graph ready for the session.
 
     Local graph: used in place — verify the folder exists (no clone/reset/push).
@@ -654,6 +776,7 @@ _USAGE = [
     'mnx_binding.py probe-remote --remote <url>      — read-only reachability + auth pre-flight',
     'mnx_binding.py write-user-default --path <dir> | --remote <url> [--force] [--default-team <t>]'
     '  — write the <mnemex_home>/config.md user default (refuses to clobber without --force)',
+    'mnx_binding.py list-graphs                      — every known graph (registry + clone cache), each flagged present',
     'mnx_binding.py persist [--message <m>]          — commit (+push) graph changes',
     'mnx_binding.py push                             — push the current branch',
 ]
@@ -680,6 +803,9 @@ def _main(argv: list[str]) -> int:
             return _emit({"error": "probe-remote needs --remote <url>"}, EXIT_ERROR)
         res = probe_remote(remote)
         return _emit(res, EXIT_OK if res.get("reachable") else EXIT_ERROR)
+
+    if cmd == "list-graphs":  # discovery — must work with no binding at all
+        return _emit({"graphs": list_graphs()}, EXIT_OK)
 
     if cmd == "write-user-default":  # runs BEFORE a binding exists — must not call resolve()
         path = _arg_after(argv, "--path")

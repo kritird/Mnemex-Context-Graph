@@ -1,6 +1,6 @@
 ---
 name: mnx-status
-description: Show an at-a-glance status of the user's Mnemex knowledge graph — what graph is bound, its kind (git-remote / git-local / plain-local), node and hot/warm/cold tier counts per team, pending (un-pushed) usage stamps, last gc per team, and a structural health summary. Use this when the user asks "what's in my graph", "is mnemex set up / healthy", "what's bound here", "mnemex status", "how big is my knowledge graph", or wants to browse what knowledge exists before reading or writing. Read-only — never syncs, commits, or repairs.
+description: Show an at-a-glance status of the user's Mnemex knowledge graph — what graph is bound, its kind (git-remote / git-local / plain-local), node and hot/warm/cold tier counts per team, pending (un-pushed) usage stamps, last gc per team, a structural health summary, and every OTHER graph Mnemex knows about. Use this when the user asks "what's in my graph", "is mnemex set up / healthy", "what's bound here", "mnemex status", "how big is my knowledge graph", "what graphs do I have", "what other graphs exist", or wants to browse what knowledge exists before reading or writing. Read-only — never syncs, commits, or repairs.
 ---
 
 # mnx-status — at-a-glance graph status
@@ -17,8 +17,10 @@ Helper you call: `scripts/mnx_status.py` (status). It aggregates `mnx_binding` (
 Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_status.py" status` and read the single JSON object.
 
 ### Not configured
-If `resolved` is false → tell the user there is no Mnemex graph configured for this project and point
-them at `/mnemex:mnx-init`. Stop.
+If `resolved` is false → check `known_graphs` first: if it has entries, tell the user they have no
+graph bound *here* but list the graphs they've used elsewhere (name, kind, `present`) so they can bind
+to one (`/mnemex:mnx-init` → connect to an existing graph) instead of assuming they must create a new
+one. If `known_graphs` is empty, just point them at `/mnemex:mnx-init`. Stop either way.
 
 ### Bound but not materialized
 If `available` is false (`clone_present` false) → the graph is bound but not synced into this session
@@ -47,6 +49,10 @@ Summarize concisely (don't dump raw JSON):
   at the next `/mnemex:mnx-promote`; `lingering_nag` means one has aged past `held_max_age_days`.
 - **Maintenance** — each team's `last_gc` and any `gc_overdue_days`.
 - **Health** — `health.errors` / `health.warnings` from the doctor's invariant suite.
+- **Known graphs** — `known_graphs` lists every OTHER graph Mnemex has registered (name, kind,
+  location, `present`), not just this one. Only mention it if the user asks, or if one entry looks
+  like it might be what they actually meant to bind here — this list is for discovery, not noise on
+  every status check.
 
 ### Recommend the next step (only when warranted)
 - `health.errors > 0` → recommend `/mnemex:mnx-doctor --fix`.

@@ -356,6 +356,14 @@ def _init_graph(remote: Optional[str] = None, path: Optional[str] = None,
         raise ToolError(ie.code, str(ie), ie.action) from ie
 
 
+@tool_guard(sync_first=False)
+def _list_graphs() -> dict[str, Any]:
+    """Every graph Mnemex knows about (onboarding plan Phase 4): the discovery registry unioned
+    with a scan of the remote-clone cache, each flagged `present`. Read-only, no binding
+    required — works before init_graph has ever been called."""
+    return {"graphs": mnx_binding.list_graphs()}
+
+
 # --- tool bodies (Phase 1 commit 1c: read) ------------------------------------------
 #
 # Deterministic mechanics only (mnx_read.py, §6.1) — routing (which team/cluster matches
@@ -779,6 +787,16 @@ def register_tools(server: "FastMCP") -> None:
                    team: str = mnx_init.DEFAULT_TEAM, org: Optional[str] = None,
                    use_default: bool = False) -> dict[str, Any]:
         return _init_graph(remote=remote, path=path, team=team, org=org, use_default=use_default)
+
+    @server.tool(name="list_graphs",
+                 description="Enumerate every graph Mnemex knows about: the discovery registry "
+                             "(<mnemex_home>/graphs.md, populated as graphs are created or "
+                             "bound) unioned with a scan of the remote-clone cache, each entry "
+                             "flagged `present` (its folder/clone currently exists on disk). "
+                             "Read-only; works with no graph bound. Use it to help the user "
+                             "pick or confirm which graph to use.")
+    def list_graphs() -> dict[str, Any]:
+        return _list_graphs()
 
     @server.tool(name="read_frontier",
                  description="Org head + team heads (one-line descriptions + child cluster "

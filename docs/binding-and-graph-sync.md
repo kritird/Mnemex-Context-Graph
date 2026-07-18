@@ -137,6 +137,7 @@ recoverable:
 
 ```
 ~/.claude/mnemex/graphs/<slug-of-graph_remote>/     ← the clone (reset to remote HEAD each session)
+~/.claude/mnemex/graphs.md                          ← the graph DISCOVERY registry (see below) — NOT a clone
 ~/.claude/mnemex/staging/<graph-slug>/              ← LOCAL side-store, OUTSIDE the clone, never reset:
     atoms/         capture staging atoms (un-promoted; survive the resync)
     stamps.jsonl   the usage-stamp spill (flushed to the registry + pushed at session end)
@@ -220,6 +221,53 @@ crashed session surfaces next time instead of silently risking a double-apply.
 On first contact with a graph that has no `mnemex.config.md`, init also writes the behavior config from
 defaults and tells the user that pattern nodes persist ~30% longer than domain facts and how to change
 that.
+
+## 📇 Graph registry & discovery
+
+Binding resolves to exactly **one** active graph — but an author accumulates several over time (a
+team graph, a personal default, one they tried once). Answering *"which graphs do I have?"* should not
+require remembering paths or grepping the filesystem.
+
+### 📒 The registry
+
+`<mnemex home>/graphs.md` is an append-only ledger, one tab-separated line per graph (tabs, not
+spaces, because a local `location` may contain them):
+
+```
+slug    kind    name    location    first_registered(UTC ISO-8601)
+```
+
+`mnx_binding.register_graph(binding)` writes it — best-effort, and a no-op if the graph's slug is
+already listed (this is a discovery ledger, not a last-used tracker). Two moments trigger it:
+
+- **`mnx_init.init_graph`** — a graph you just created or bound via guided setup.
+- **`mnx_binding.sync`** — the one chokepoint the MCP session guard and the Claude SessionStart hook
+  both already call before touching a graph, so a graph bound **by hand** (a hand-written
+  `.mnemex.md`, an env var, a hand-edited user `config.md`) is registered the first time it is
+  actually used too — not only graphs created through `init_graph`.
+
+A failed registry write (read-only home, disk full, …) never fails the read/sync/init call it rides
+along with — `register_graph` catches everything and reports `{"registered": false, "error": ...}`
+instead of raising.
+
+### 🔎 `list_graphs`
+
+`mnx_binding.list_graphs()` returns the registry **unioned** with a scan of `graphs_cache_root()`
+(`<mnemex home>/graphs/`, the remote-clone cache) for entries the registry missed — e.g. a clone made
+before this registry existed. That scan is bounded to this **one** known directory — never a
+filesystem-wide search for `mnemex.config.md` files.
+
+Each entry is flagged `present`: for a `git-remote` graph, whether its clone still exists under the
+cache; for a local graph, whether its folder still exists at `location`. A graph you registered but
+later deleted still shows up (`present: false`) instead of silently vanishing.
+
+Exposed as:
+
+- **MCP:** the `list_graphs` tool — read-only, no binding required, works before `init_graph` has ever
+  been called.
+- **CLI:** `mnx_binding.py list-graphs`.
+- **`mnx-status`** folds the same list into its `known_graphs` field, so a status check surfaces
+  graphs used elsewhere even when the current project has no binding of its own.
 
 ## 🔑 Auth & branch
 

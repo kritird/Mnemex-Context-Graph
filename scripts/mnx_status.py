@@ -141,13 +141,25 @@ def _health(root: Path) -> dict[str, Any]:
         return {"ok": None, "error": str(exc)}
 
 
+def _known_graphs() -> Any:
+    """Every graph Mnemex has registered (onboarding plan Phase 4), best-effort — a broken
+    registry must never break status. Useful even with no binding: it's how a user with no
+    project binding can still see (and pick from) graphs they've used elsewhere."""
+    try:
+        return mnx_binding.list_graphs()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 def status() -> dict[str, Any]:
     binding = mnx_binding.resolve()
     if binding is None:
         return {"resolved": False,
-                "message": "No Mnemex graph configured for this project. Run /mnemex:mnx-init."}
+                "message": "No Mnemex graph configured for this project. Run /mnemex:mnx-init.",
+                "known_graphs": _known_graphs()}
 
-    out: dict[str, Any] = {"resolved": True, "binding": binding.to_dict()}
+    out: dict[str, Any] = {"resolved": True, "binding": binding.to_dict(),
+                           "known_graphs": _known_graphs()}
     present = _is_present(binding)
     out["clone_present"] = present
 

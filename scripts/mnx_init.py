@@ -208,6 +208,9 @@ def init_local(path: str | Path, team: str = DEFAULT_TEAM,
     out["seed_available"] = out["action"] == "scaffolded"
     if out["seed_available"]:
         out["next_step"] = mnx_read.fill_offer(True, 0)["message"]
+    # Registry (onboarding plan Phase 4): unconditional (not just on a fresh scaffold) — an
+    # "already-graph" hit is still a successful bind worth remembering for list_graphs.
+    mnx_binding.register_graph(mnx_binding.Binding("init", local_path=str(root)))
     return out
 
 
@@ -264,6 +267,7 @@ def init_remote(remote: str, team: str = DEFAULT_TEAM,
     # refused above), so the fork is unconditionally available here — see init_local's note.
     out["seed_available"] = True
     out["next_step"] = mnx_read.fill_offer(True, 0)["message"]
+    mnx_binding.register_graph(mnx_binding.Binding("init", remote=remote))
     return out
 
 

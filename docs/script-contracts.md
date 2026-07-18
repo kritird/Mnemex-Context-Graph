@@ -74,6 +74,13 @@ probe_remote(remote, timeout=20) -> {reachable: bool, category?: auth|not-found|
 write_user_default(path|remote, force=False, default_team?, author?) -> {ok, action: written|overwritten|exists, path, ...}
     # guided setup: write <mnemex home>/config.md (the user default). EXACTLY ONE of path/remote.
     # refuses to clobber an existing default without force; stores an ABSOLUTE path (resolves from any cwd).
+register_graph(binding) -> {registered: bool, slug?, reason?, error?}
+    # best-effort append to <mnemex home>/graphs.md if `binding.slug()` isn't already listed. NEVER
+    # raises. Called by sync() (non-error actions only) and mnx_init.init_graph.
+list_graphs() -> [{slug, kind, name, location, last_used, present}, ...]
+    # the registry UNIONED with a scan of graphs_cache_root() for clones the registry missed. Bounded
+    # to that one dir — no filesystem-wide search. `present`: clone exists (remote) / folder exists
+    # (local). Works with no binding at all.
 ```
 
 **Guided setup (onboarding):** `mnx_init.suggest_default_graph(cwd) -> {path, org, team, rationale}` proposes
@@ -86,7 +93,7 @@ the read-only `init_suggest` tool and `init_graph(use_default=true)`; over the C
 side-store folder (`~/.claude/mnemex/staging/<slug>/`) used by `mnx_stage` (capture atoms) and
 `mnx_stamp` (the stamp spill); `graph_slug`/`staging_root` also appear in `resolve`/`status` JSON.
 
-CLI: `resolve | sync | status | unpushed-state | persist --message "…" | push | graph-root | staging-path | probe-remote --remote <url> | write-user-default --path <dir>|--remote <url> [--force]`.
+CLI: `resolve | sync | status | unpushed-state | persist --message "…" | push | graph-root | staging-path | probe-remote --remote <url> | write-user-default --path <dir>|--remote <url> [--force] | list-graphs`.
 Each prints one JSON object. `status` folds in
 `unpushed`/`ahead` for a materialized remote clone, so callers see a stranded promote without a second
 call. `probe-remote` runs before any binding exists, so it does not call `resolve()`.

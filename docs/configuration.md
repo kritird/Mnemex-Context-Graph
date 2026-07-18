@@ -19,10 +19,10 @@ is the schema, the defaults, and the rules around changing values.
 
 ## 📂 Where user-level state lives (the mnemex home)
 
-Everything per-author and per-machine — the user config (`config.md`), graph clones (`graphs/`),
-capture staging + stamp spill (`staging/`), hook run markers (`run/`), and the ingest cache
-(`ingest-cache/`) — lives under one **mnemex home** directory, resolved by
-`mnx_common.mnemex_home()` with this precedence (first hit wins):
+Everything per-author and per-machine — the user config (`config.md`), the graph discovery registry
+(`graphs.md`), graph clones (`graphs/`), capture staging + stamp spill (`staging/`), hook run markers
+(`run/`), and the ingest cache (`ingest-cache/`) — lives under one **mnemex home** directory, resolved
+by `mnx_common.mnemex_home()` with this precedence (first hit wins):
 
 1. **`$MNEMEX_HOME`** — explicit override; works identically under every agent host.
 2. **`$CLAUDE_CONFIG_DIR/mnemex`** — respected when Claude Code runs with a relocated config dir.
@@ -53,6 +53,13 @@ folder** — no git remote, no credentials, so it always succeeds:
 A git remote stays fully supported (`graph_remote`) — it is the right choice for sharing a graph across
 machines or a team — but it is no longer the default, because auth/network can fail and onboarding must
 not.
+
+### Knowing what graphs you have
+
+`<mnemex home>/graphs.md` is an append-only registry of every graph you've created or bound — the
+`list_graphs` MCP tool, the `mnx_binding.py list-graphs` CLI, and `mnx-status`'s `known_graphs` field
+all read it. Full spec (format, write triggers, the `present` flag): see the "Graph registry &
+discovery" section of [`binding-and-graph-sync.md`](binding-and-graph-sync.md).
 
 ---
 
