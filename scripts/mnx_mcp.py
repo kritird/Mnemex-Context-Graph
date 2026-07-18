@@ -57,8 +57,10 @@ import mnx_binding
 import mnx_common
 import mnx_config
 import mnx_doctor
+import mnx_er
 import mnx_glean
 import mnx_hooks
+import mnx_ingest
 import mnx_init
 import mnx_procedures
 import mnx_promote
@@ -438,16 +440,22 @@ def _capture_add(type: str = "domain", summary: str = "", aliases: Optional[list
                  domain: Optional[list[str]] = None, trigger: Optional[str] = None,
                  score: str = "later", urgent: bool = False, volatility: Any = "default",
                  provenance: Optional[dict[str, Any]] = None, body: str = "",
+                 ingest_batch: Optional[str] = None,
                  binding: Any = None, sync: Any = None) -> dict[str, Any]:
     """Stage one atom. Idempotent by content hash (a re-capture of identical content is a
     no-op restage, not a duplicate). Refuses a NEW atom once the session batch is past the
     hard budget — the refusal message names both ways out (promote to drain, or drop/
     discard-all to make room). node_body_max_chars is a SOFT budget (not enforced by the
     doctor gate) — a body over it is flagged in the result as `over_budget`; the host is
-    expected to split it into multiple linked atoms rather than stage one oversized body."""
+    expected to split it into multiple linked atoms rather than stage one oversized body.
+
+    ``ingest_batch`` labels the atom as part of a bulk corpus import: it sets bulk=true, gives
+    the batch its own large cap, and partitions it from hand-captures (DP8) so the per-session
+    nag never fires. The corpus provenance fields (source_repo/commit_sha/source_path/anchor/
+    kind) travel in ``provenance`` — that makes the atom promotable COLD via mnx-promote --bulk."""
     atom = {"type": type, "summary": summary, "aliases": aliases, "domain": domain,
             "trigger": trigger, "score": score, "urgent": urgent, "volatility": volatility,
-            "provenance": provenance or {}, "body": body}
+            "provenance": provenance or {}, "body": body, "ingest_batch": ingest_batch}
     try:
         result = mnx_stage.add(atom)
     except ValueError as ve:
@@ -484,6 +492,100 @@ def _glean_step(before: int, after: int, pass_no: int,
     """One guardrail tick of the capture glean loop: did the last pass add a new staged atom,
     and should another pass run. Pure computation — no binding, no staging access."""
     return mnx_glean.step(before, after, pass_no, max_passes)
+
+
+# --- tool bodies (Phase 2: bulk ingest) ----------------------------------------------
+#
+# Thin shims over the deterministic corpus front-end (mnx_ingest), the coverage primitive
+# (mnx_glean.coverage), and the entity-resolution proposer (mnx_er) — exposing the SAME engine the
+# Claude mnx-ingest skill drives so a foreign MCP host can bootstrap/re-import a repo (plan Phase 2,
+# closes F4). Judgment (is this a durable atom? which merge?) stays with the host model + the
+# ingest-procedure prompt; these tools only walk/probe/delta/dedupe. DP1/DP3: ingest NEVER writes
+# graph_root and NEVER mutates the source — acquire clones a remote read-only into the ingest cache;
+# probe/delta only read the (user-directed) source; manifest_write is the sole ingest writer and
+# lands strictly under <graph>/.mnemex/ingest/.
+
+def _require_source_root(root: str) -> Path:
+    """Resolve an ingest source/walk root. Unlike confine(), the source is a user-directed external
+    corpus read (DP3 — read-only), so it is deliberately NOT restricted to the graph/home/cache set;
+    it need only exist and be a directory. Every WRITE and graph-scoped read still goes through the
+    binding + confine(), so this exception widens reads of an explicitly-named source only."""
+    p = Path(root).expanduser().resolve()
+    if not p.is_dir():
+        raise ToolError("bad-root", f"ingest root is not a directory: {root}",
+                        "pass the `root` returned by ingest_acquire")
+    return p
+
+
+@tool_guard(sync_first=False)
+def _ingest_source_slug(source: str) -> dict[str, Any]:
+    """The stable manifest slug for a source URL / path. Pure; no I/O."""
+    return {"slug": mnx_ingest.source_slug(source)}
+
+
+@tool_guard(sync_first=False)
+def _ingest_acquire(source: str, cache: Optional[str] = None) -> dict[str, Any]:
+    """Materialize a read-only corpus: a remote URL is shallow-cloned into the ingest cache; a local
+    path is used in place. Returns {kind, root, commit, cached, slug}. Never mutates the source."""
+    try:
+        res = mnx_ingest.acquire(source, cache)
+    except FileNotFoundError as fe:
+        raise ToolError("source-not-found", str(fe), "check the source path/URL") from fe
+    except Exception as exc:
+        raise ToolError("acquire-failed", f"{type(exc).__name__}: {exc}",
+                        "check the source URL and network/auth") from exc
+    res["slug"] = mnx_ingest.source_slug(source)
+    return res
+
+
+@tool_guard(sync_first=False)
+def _ingest_probe(root: str, include: Optional[str] = None, exclude: Optional[str] = None,
+                  max_bytes: int = mnx_ingest.MAX_BYTES_DEFAULT) -> dict[str, Any]:
+    """Walk → classify → chunk → hash the corpus into candidate units + a scope estimate (gate #1).
+    Read-only; secrets are counted but never opened."""
+    return mnx_ingest.probe(str(_require_source_root(root)), include, exclude, max_bytes)
+
+
+@tool_guard()
+def _ingest_delta(root: str, source_slug: str, include: Optional[str] = None,
+                  exclude: Optional[str] = None, max_bytes: int = mnx_ingest.MAX_BYTES_DEFAULT,
+                  binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """Re-import diff: added/changed/unchanged/orphans vs the prior manifest for `source_slug`
+    (stored under the BOUND graph). Extract only added+changed; orphans surface, never auto-die."""
+    manifest = mnx_ingest.manifest_path(binding.graph_root(), source_slug)
+    confine(manifest, allowed_roots(binding))
+    return mnx_ingest.delta(str(_require_source_root(root)), str(manifest), include, exclude, max_bytes)
+
+
+@tool_guard()
+def _ingest_manifest_write(source_slug: str, files: dict[str, Any],
+                           source_repo: Optional[str] = None, last_commit: Optional[str] = None,
+                           binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """Record the ingest manifest (source_path@commit → node_ids) under the BOUND graph so the next
+    re-import diffs correctly. The sole ingest writer; always lands under <graph>/.mnemex/ingest/."""
+    path = mnx_ingest.manifest_path(binding.graph_root(), source_slug)
+    confine(path, allowed_roots(binding))
+    return mnx_ingest.manifest_write(binding.graph_root(), source_slug, files or {},
+                                     source_repo, last_commit)
+
+
+@tool_guard(sync_first=False)
+def _glean_coverage(units: list[dict[str, Any]], staged: list[dict[str, Any]], pass_no: int,
+                    max_passes: int = mnx_glean.DEFAULT_MAX_PASSES) -> dict[str, Any]:
+    """Ingest coverage checklist: which enumerated units still have zero staged atoms + a stop
+    signal (complete/cap). Distinct from glean_step (the episodic before/after guardrail). Pure."""
+    return mnx_glean.coverage(units, staged, pass_no, max_passes)
+
+
+@tool_guard()
+def _er_resolve(atoms: list[dict[str, Any]], team: Optional[str] = None,
+                match: float = mnx_er.MATCH_DEFAULT, possible: float = mnx_er.POSSIBLE_DEFAULT,
+                binding: Any = None, sync: Any = None) -> dict[str, Any]:
+    """Entity resolution over {staged atoms ∪ existing graph pages} in the BOUND graph: propose a
+    CREATE / MERGE / COLLAPSE disposition per cluster + a `possible` HITL band. Reads the graph
+    (already merges into existing pages — the existing-graph import case); writes nothing."""
+    return mnx_er.resolve(binding.graph_root(), atoms or [], team or binding.default_team,
+                          match, possible)
 
 
 # --- tool bodies (Phase 2 commit 2b: promote) ----------------------------------------
@@ -715,15 +817,18 @@ def register_tools(server: "FastMCP") -> None:
                              "promote time, so an oversized body is staged and later lands "
                              "unsplit unless the host splits it into multiple linked atoms "
                              "itself; the result carries `over_budget: {chars, cap}` when this "
-                             "applies.\n\n"
+                             "applies. Pass ingest_batch=<id> to stage a bulk corpus atom (sets "
+                             "bulk=true, own large cap, no per-session nag); corpus provenance "
+                             "(source_repo/commit_sha/source_path/anchor/kind) rides in "
+                             "provenance.\n\n"
                              + mnx_procedures.render_digest("capture"))
     def capture_add(type: str = "domain", summary: str = "", aliases: Optional[list[str]] = None,
                     domain: Optional[list[str]] = None, trigger: Optional[str] = None,
                     score: str = "later", urgent: bool = False, volatility: Any = "default",
                     provenance: Optional[dict[str, Any]] = None,
-                    body: str = "") -> dict[str, Any]:
+                    body: str = "", ingest_batch: Optional[str] = None) -> dict[str, Any]:
         return _capture_add(type, summary, aliases, domain, trigger, score, urgent,
-                            volatility, provenance, body)
+                            volatility, provenance, body, ingest_batch)
 
     @server.tool(name="capture_drop",
                  description="Drop one staged atom by its provisional id (stg-...). Not-found "
@@ -745,6 +850,77 @@ def register_tools(server: "FastMCP") -> None:
     def glean_step(before: int, after: int, pass_no: int,
                    max_passes: int = mnx_glean.DEFAULT_MAX_PASSES) -> dict[str, Any]:
         return _glean_step(before, after, pass_no, max_passes)
+
+    @server.tool(name="ingest_source_slug",
+                 description="The stable manifest slug for a source URL or path (keys the re-import "
+                             "manifest). Pure — no I/O.")
+    def ingest_source_slug(source: str) -> dict[str, Any]:
+        return _ingest_source_slug(source)
+
+    @server.tool(name="ingest_acquire",
+                 description="Materialize a read-only corpus for ingest: a remote URL (or *.git) is "
+                             "shallow-cloned into the ingest cache; a local path is used in place. "
+                             "Returns {kind, root, commit, cached, slug}. Never mutates the source; "
+                             "secrets are never read. Call ingest_probe on the returned root next.\n\n"
+                             + mnx_procedures.render_digest("ingest"))
+    def ingest_acquire(source: str, cache: Optional[str] = None) -> dict[str, Any]:
+        return _ingest_acquire(source, cache)
+
+    @server.tool(name="ingest_probe",
+                 description="Walk → classify → chunk → hash the corpus at `root` into candidate "
+                             "extraction units (doc|interface|code-doc|config, chunked by heading / "
+                             "exported symbol) plus a scope estimate {counts, est_atoms, "
+                             "bytes_total, skipped_secrets} for gate #1. Read-only; private symbols "
+                             "and secrets are never emitted. Optional include/exclude globs.")
+    def ingest_probe(root: str, include: Optional[str] = None, exclude: Optional[str] = None,
+                     max_bytes: int = mnx_ingest.MAX_BYTES_DEFAULT) -> dict[str, Any]:
+        return _ingest_probe(root, include, exclude, max_bytes)
+
+    @server.tool(name="ingest_delta",
+                 description="Re-import diff against the prior manifest for source_slug (stored under "
+                             "the bound graph): {added, changed, unchanged, orphans}. Extract only "
+                             "added+changed (unchanged files are skipped — the re-run cost saver); "
+                             "orphans are deleted source files' node_ids, surfaced for the human and "
+                             "NEVER auto-tombstoned. Read-only.")
+    def ingest_delta(root: str, source_slug: str, include: Optional[str] = None,
+                     exclude: Optional[str] = None,
+                     max_bytes: int = mnx_ingest.MAX_BYTES_DEFAULT) -> dict[str, Any]:
+        return _ingest_delta(root, source_slug, include, exclude, max_bytes)
+
+    @server.tool(name="glean_coverage",
+                 description="Ingest coverage checklist (distinct from glean_step): given the probe "
+                             "units and the staged ledger, return which units still have zero staged "
+                             "atoms (the re-ask worklist) + a stop signal (complete = every unit "
+                             "covered, or cap = max_glean_passes). A unit is covered when a staged "
+                             "atom carries its anchor in provenance. Pure.")
+    def glean_coverage(units: list[dict[str, Any]], staged: list[dict[str, Any]], pass_no: int,
+                       max_passes: int = mnx_glean.DEFAULT_MAX_PASSES) -> dict[str, Any]:
+        return _glean_coverage(units, staged, pass_no, max_passes)
+
+    @server.tool(name="er_resolve",
+                 description="Entity resolution over {staged atoms ∪ existing graph pages} in the "
+                             "bound graph: block → score → cluster → propose one disposition per "
+                             "cluster — CREATE (no graph match) / MERGE (folds into an existing "
+                             "page, keeps its id — this is how a re-import merges instead of "
+                             "duplicating) / COLLAPSE (intra-batch dups → one CREATE) — plus a "
+                             "`possible` HITL band (the only place you rule on a merge). Writes "
+                             "nothing. `atoms` are the staged candidates ({id/provisional_id, "
+                             "summary, aliases, domain, mentions}); match/possible are score bands.")
+    def er_resolve(atoms: list[dict[str, Any]], team: Optional[str] = None,
+                   match: float = mnx_er.MATCH_DEFAULT,
+                   possible: float = mnx_er.POSSIBLE_DEFAULT) -> dict[str, Any]:
+        return _er_resolve(atoms, team, match, possible)
+
+    @server.tool(name="ingest_manifest_write",
+                 description="Record the ingest manifest (source_path → {hash, nodes:[id,...]}) "
+                             "under the bound graph so the next re-import diffs correctly. The sole "
+                             "ingest writer — always lands under <graph>/.mnemex/ingest/<slug>.json, "
+                             "never the source. Normally called by promote on confirmed persist; "
+                             "exposed here for hosts driving the bulk flow by hand.")
+    def ingest_manifest_write(source_slug: str, files: dict[str, Any],
+                              source_repo: Optional[str] = None,
+                              last_commit: Optional[str] = None) -> dict[str, Any]:
+        return _ingest_manifest_write(source_slug, files, source_repo, last_commit)
 
     @server.tool(name="promote_begin",
                  description="Begin a promote transaction: preflight guards (D7 unpushed -> "
