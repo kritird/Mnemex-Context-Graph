@@ -1,0 +1,1 @@
+This response already carries `fill_offer` (composed from the same staged count) — no extra call needed.

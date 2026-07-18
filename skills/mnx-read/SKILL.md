@@ -44,6 +44,17 @@ rows, just what routing needs.
 - **Route (judgment, not the script's job):** choose the team(s) whose `description` matches the
   request, then the cluster(s) within it whose `description` matches — structural matching on the
   one-line descriptions and node `summary`/`aliases`, not guesswork.
+- **Empty graph — offer the fork, once (onboarding plan Phase 3).** If `empty` is true, this is
+  likely the user's first read of a freshly created graph — the moment onboarding cares about
+  most. Check what's already staged: run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stage.py" status` and read its `count`.
+  - **Nothing staged either:** offer *"This graph is empty. Seed it from a repo/docs now, or
+    just keep working — I'll remember as we go."* "Seed now" hands off to `/mnemex:mnx-ingest`
+    (its own consent gate still applies there); "keep working" needs nothing further from
+    you — episodic capture already fills the graph as the session goes.
+  - **N atoms already staged:** do **not** re-offer bulk import — the user already chose the
+    episodic path, and re-pitching bulk every read would nag. Say *"N items captured; promote
+    to see them"* and point at `/mnemex:mnx-promote` instead.
+  - Ask this once per session; if declined, keep reading normally without repeating the offer.
 
 ### 2. Scan tiers in order, stop early
 For each chosen cluster (`path` from step 1), run:

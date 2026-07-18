@@ -332,7 +332,11 @@ def _init_graph(remote: Optional[str] = None, path: Optional[str] = None,
 
     ``use_default=True`` is the zero-argument onboarding path: take the ``init_suggest`` proposal
     (a local folder under the mnemex home, named after this project), scaffold it, AND write it as
-    the user default so the very next tool call resolves it — no path/remote needed."""
+    the user default so the very next tool call resolves it — no path/remote needed.
+
+    A freshly scaffolded graph is always empty, so the result carries ``seed_available``/
+    ``next_step`` (onboarding plan Phase 3 — the same fork ``read_frontier`` offers on first
+    read, surfaced here too so a host can offer it immediately after setup)."""
     if use_default:
         proposal = mnx_init.suggest_default_graph(os.getcwd())
         try:
@@ -361,8 +365,17 @@ def _init_graph(remote: Optional[str] = None, path: Optional[str] = None,
 @tool_guard()
 def _read_frontier(binding: Any = None, sync: Any = None) -> dict[str, Any]:
     """Org head + team heads (descriptions + child cluster descriptions), plus the
-    graph-wide consolidation-overdue warning. Never tier rows — call read_cluster next."""
-    return mnx_read.frontier(binding.graph_root(), mnx_common.now_utc())
+    graph-wide consolidation-overdue warning. Never tier rows — call read_cluster next.
+
+    When the graph is empty, also attaches `fill_offer` (onboarding plan Phase 3 — the
+    empty-graph fork): composed here rather than inside `mnx_read.frontier()` because only a
+    resolved binding can see staging state (`mnx_stage.status()`); frontier() stays binding-
+    free and pays no extra cost on the common non-empty path."""
+    result = mnx_read.frontier(binding.graph_root(), mnx_common.now_utc())
+    if result["empty"]:
+        staged_count = mnx_stage.status(binding=binding)["count"]
+        result["fill_offer"] = mnx_read.fill_offer(True, staged_count)
+    return result
 
 
 @tool_guard()

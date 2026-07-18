@@ -77,6 +77,10 @@ flowchart TD
     class B,K,F leaf;
 ```
 
+Getting a graph (creating or connecting one) is a separate, lighter step from filling it — binding
+never reads a repo or costs a token on its own; filling, bulk or session-by-session, always happens
+in-session, because deciding what's worth remembering is irreducibly an LLM judgment call.
+
 > [!IMPORTANT]
 > **You can bootstrap the whole graph from an existing repo — not just grow it session by session.**
 > [`mnx-ingest`](corpus-ingestion.md) reads an entire code/doc repository and **distills** its durable

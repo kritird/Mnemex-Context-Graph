@@ -10,7 +10,11 @@ Three helpers, one per SKILL step:
 
   * `frontier(graph_root, now)` — org head + team heads (descriptions + child cluster
     descriptions only, never tier rows) + the graph-wide consolidation-overdue warning
-    (`mnx_compact.overdue`). Replaces the SKILL's own raw `Read` calls on index.md heads.
+    (`mnx_compact.overdue`) + an `empty` flag (no team has any cluster yet). Replaces the
+    SKILL's own raw `Read` calls on index.md heads.
+  * `fill_offer(empty, staged_count)` — onboarding plan Phase 3: the empty-graph fork
+    message, composed from `frontier()`'s `empty` flag and a staged-atom count the caller
+    supplies (`mnx_stage.status()["count"]`) — `frontier()` itself stays binding-free.
   * `scan(cluster, now, tiers, binding)` — a cluster's tier tables (hot/warm/cold), each row
     carrying a `stale` flag computed from the already-materialized `stale_after` column
     (Freshness & Revalidation), PLUS the staged-capture overlay for that cluster's domain
@@ -93,7 +97,34 @@ def frontier(graph_root: str | Path, now: str) -> dict[str, Any]:
                          "description": team_idx.get("description", "") or row.get("summary", ""),
                          "clusters": clusters})
 
-    return {"graph_root": str(root), "overdue": overdue, "org_head": org_head, "teams": teams}
+    empty = not any(t["clusters"] for t in teams)
+    return {"graph_root": str(root), "overdue": overdue, "org_head": org_head, "teams": teams,
+           "empty": empty}
+
+
+# --- fill_offer (onboarding plan Phase 3, the empty-graph fork) --------------------
+
+
+def fill_offer(empty: bool, staged_count: int) -> Optional[dict[str, Any]]:
+    """The empty-graph fork suggestion — composed from two signals `frontier()` alone can't
+    see (staging lives outside the graph, keyed by binding, not graph_root; see mnx_stage.py),
+    so this stays a separate pure function the caller feeds both into. `None` when there is
+    nothing to offer (graph not empty).
+
+    Deliberately NOT folded into `frontier()` itself: that would force a binding dependency
+    onto a function that today only needs a bare graph_root, and would make the always-empty
+    check pay for a staging-dir scan on every single read even when the graph is non-empty
+    (the common case). Callers (the MCP `read_frontier` tool; the mnx-read SKILL step) compose
+    this explicitly, only when `empty` is true.
+    """
+    if not empty:
+        return None
+    if staged_count == 0:
+        return {"offer": "fill", "message": (
+            "This graph is empty. Seed it from a repo/docs now, or just keep working — "
+            "I'll remember as we go.")}
+    plural = "" if staged_count == 1 else "s"
+    return {"offer": "promote", "message": f"{staged_count} item{plural} captured; promote to see them."}
 
 
 # --- scan (SKILL steps 3+3b+3c: tier tables + staged overlay + stale cues) ---------

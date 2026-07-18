@@ -198,6 +198,14 @@ flowchart TD
 > 🚫 `mnx-read` **never** rewrites a node, rewrites an index, or compacts. Its only write is the
 > append-only registry stamp — that is what keeps recall effectively *pure* while still feeding relevance.
 
+> [!TIP]
+> 🌱 **First read on an empty graph?** `mnx-read` notices (`read_frontier`'s `empty` flag) and offers a
+> fork right there instead of just returning nothing: **seed it now** from a repo/docs — hands off to
+> `mnx-ingest`, its own consent gate still applies — or **just keep working**, and episodic capture
+> fills the graph as the session goes. Already staged atoms without promoting? It nudges you to promote
+> instead of re-pitching bulk import. Same fork on Claude and on a foreign MCP host — see
+> [`corpus-ingestion.md`](corpus-ingestion.md) and [`staging-and-promotion.md`](staging-and-promotion.md).
+
 ---
 
 ## 5️⃣ Stage five — Wrapping a session: capture (stage locally) ✍️

@@ -30,6 +30,7 @@ import mnx_common
 import mnx_config
 import mnx_doctor
 import mnx_phonebook
+import mnx_read
 import mnx_regen
 
 DEFAULT_TEAM = "team-core"
@@ -200,6 +201,13 @@ def init_local(path: str | Path, team: str = DEFAULT_TEAM,
            "kind": kind, "graph_root": str(root.resolve()),
            "scaffold": scaffold_result}
     out.update(_finish_clean(root))
+    # Onboarding plan Phase 3 (the seam): a graph THIS call just scaffolded is guaranteed
+    # empty (scaffold() never writes domains/nodes) — offer the fill fork right away instead
+    # of waiting for the first read to discover it. An "already-graph" hit may hold real
+    # content, so it stays silent here (mnx-read's frontier.empty is the honest check for it).
+    out["seed_available"] = out["action"] == "scaffolded"
+    if out["seed_available"]:
+        out["next_step"] = mnx_read.fill_offer(True, 0)["message"]
     return out
 
 
@@ -252,6 +260,10 @@ def init_remote(remote: str, team: str = DEFAULT_TEAM,
            "graph_root": str(clone), "graph_remote": remote,
            "scaffold": scaffold_result, "pushed": True}
     out.update(finish)
+    # init_remote only ever reaches this point on a fresh scaffold (a non-empty remote is
+    # refused above), so the fork is unconditionally available here — see init_local's note.
+    out["seed_available"] = True
+    out["next_step"] = mnx_read.fill_offer(True, 0)["message"]
     return out
 
 

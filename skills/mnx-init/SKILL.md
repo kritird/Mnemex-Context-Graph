@@ -136,6 +136,24 @@ warnings on a brand-new graph — inv-1 and inv-15):
 
 On success, tell the user mnemex is ready and which graph it is bound to.
 
+## 6. Offer to fill it, if you just created a graph
+
+A **freshly created** graph (mode = create, step 3a) is always empty — `mnx-read`'s first
+`read_frontier` call would discover this and offer the same fork on its own (onboarding plan
+Phase 3), but don't make the user wait for that round-trip. Offer it now, right after step 5
+succeeds:
+
+*"This graph is empty. Seed it from a repo/docs now, or just keep working — I'll remember as
+we go."*
+
+- **Seed now** → hand off to `/mnemex:mnx-ingest` (its own consent gate #1 still applies — this
+  offer does not skip it).
+- **Keep working** → nothing further needed; episodic capture (`/mnemex:mnx-capture`) already
+  fills the graph as the session goes.
+
+Skip this step when the mode was **bind** or **user default** to an *existing* graph — only a
+graph this skill just scaffolded is guaranteed empty; an existing graph may already be full.
+
 ## First-contact graph behavior config
 
 If the bound graph has **no** `mnemex.config.md` yet (a freshly created remote), write it from the

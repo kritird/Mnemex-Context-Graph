@@ -1,0 +1,1 @@
+Check what's already staged: run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stage.py" status` and read its `count`.
