@@ -503,11 +503,12 @@ def _record_usage(manifest: list[dict[str, Any]],
             continue
         weight = entry.get("weight")
         res = mnx_stamp.append(str(Path(path).parent), nid, role,
-                               float(weight) if weight is not None else 1.0)
+                               float(weight) if weight is not None else 1.0,
+                               binding=binding)
         stamped.append({"id": nid, "role": role, **res})
     out: dict[str, Any] = {"stamped": stamped, "ignored": ignored, "errors": errors}
     if stamped and binding.kind() == "git-remote":
-        out["flush"] = mnx_stamp.flush()
+        out["flush"] = mnx_stamp.flush(binding=binding)
     return out
 
 
@@ -549,7 +550,7 @@ def _capture_add(type: str = "domain", summary: str = "", aliases: Optional[list
             "trigger": trigger, "score": score, "urgent": urgent, "volatility": volatility,
             "provenance": provenance or {}, "body": body, "ingest_batch": ingest_batch}
     try:
-        result = mnx_stage.add(atom)
+        result = mnx_stage.add(atom, binding=binding)
     except ValueError as ve:
         raise ToolError("invalid-atom", str(ve), "fix the atom fields and retry") from ve
     cap = int(mnx_config.load(binding.graph_root()).get("node_body_max_chars", 6000))
@@ -646,7 +647,10 @@ def _ingest_delta(root: str, source_slug: str, include: Optional[str] = None,
     (stored under the BOUND graph). Extract only added+changed; orphans surface, never auto-die."""
     manifest = mnx_ingest.manifest_path(binding.graph_root(), source_slug)
     confine(manifest, allowed_roots(binding))
-    return mnx_ingest.delta(str(_require_source_root(root)), str(manifest), include, exclude, max_bytes)
+    # allow_missing_manifest: the path is DERIVED here (not caller-typed), so no manifest
+    # legitimately means "first import of this slug" — the result carries first_import: true.
+    return mnx_ingest.delta(str(_require_source_root(root)), str(manifest), include, exclude,
+                            max_bytes, allow_missing_manifest=True)
 
 
 @tool_guard()
@@ -1080,8 +1084,14 @@ def register_tools(server: "FastMCP") -> None:
                              "{plan_version: 1, dispositions: [{pid, op: create|merge|supersede|"
                              "resurrect|drop_dup|hold, ...op-specific fields}], splits?, links?, "
                              "consolidate?} — every staged pid from promote_begin's batch must "
-                             "get exactly one disposition. op-specific fields: create/supersede "
-                             "need cluster + fields (fields.title required); supersede also "
+                             "get exactly one disposition. `cluster` is a graph-root-relative "
+                             "'<team>/<cluster-name>' path (a bare name is auto-prefixed with "
+                             "the transaction's team; pass fields.new_cluster=true to create a "
+                             "cluster that does not exist yet). op-specific fields: create/"
+                             "supersede need cluster + fields (fields.title required; any of "
+                             "summary/body/aliases/domain/type/volatility/trigger/mentions/"
+                             "provenance left unset are inherited from the staged atom, so the "
+                             "captured content is never lost); supersede also "
                              "needs old_id; merge needs id + cluster + changes (a dict — "
                              "REPLACEMENT values, not additive, for any of summary/aliases/"
                              "domain/confidence/references/mentions/edges/volatility/trigger/"

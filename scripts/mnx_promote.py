@@ -86,14 +86,79 @@ def _cluster_path(graph_root: str, cluster: str) -> Path:
     p = Path(cluster)
     if not p.is_absolute():
         p = Path(graph_root) / cluster
+    rp = p.resolve()
+    if Path(graph_root).resolve() not in rp.parents:
+        # Defense in depth behind _canon_cluster: nothing may ever write outside the graph.
+        raise ValueError(f"cluster path {cluster!r} escapes the graph root")
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
+def _canon_cluster(graph_root: str, cluster: Any,
+                   team: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Normalize a plan's cluster reference to a graph-root-relative ``<team>/<name>`` path.
+
+    Returns ``(normalized, error)`` — exactly one is set. Accepts ``<team>/<name>``, a bare
+    ``<name>`` (prefixed with the transaction's team), or an absolute path inside the graph
+    root. Rejects anything outside the graph root, not exactly team/cluster deep, or under a
+    team directory that does not exist — a bare-name plan (e.g. er_resolve's canonical fed
+    straight back) used to land a cluster at the graph ROOT, invisible to read_frontier and
+    miscounted as a team by status (E2E 2026-07-19, H3)."""
+    raw = str(cluster or "")
+    if not raw:
+        return None, None  # the "requires cluster" check reports this one
+    p = Path(raw)
+    if p.is_absolute():
+        try:
+            parts = p.resolve().relative_to(Path(graph_root).resolve()).parts
+        except ValueError:
+            return None, f"cluster {raw!r} escapes the graph root"
+    else:
+        parts = p.parts
+        if ".." in parts:
+            return None, f"cluster {raw!r} escapes the graph root"
+    if len(parts) == 1:
+        if not team:
+            return None, (f"cluster {raw!r} must be team-qualified '<team>/<cluster-name>' "
+                          "(no transaction team to infer)")
+        parts = (team, parts[0])
+    if len(parts) != 2:
+        return None, f"cluster {raw!r} must be '<team>/<cluster-name>'"
+    if not (Path(graph_root) / parts[0]).is_dir():
+        return None, (f"cluster {raw!r}: team directory {parts[0]!r} does not exist "
+                      "in this graph")
+    return "/".join(parts), None
+
+
+# Staged-atom keys a create/supersede disposition inherits when its `fields` leaves them
+# unset. The husk-node fix (E2E 2026-07-19, H2): a minimal plan ({title} only, which is all
+# the schema requires) used to mint content-empty nodes, silently discarding the staged
+# summary/body/domain — the graph then had nothing for er_resolve to match, so re-imports
+# duplicated instead of merging. `title` stays caller-authored (atoms have no title field).
+_ATOM_DEFAULT_KEYS = ("type", "summary", "aliases", "domain", "volatility",
+                      "trigger", "mentions", "provenance", "body")
+
+
+def _with_atom_defaults(fields: dict[str, Any], atom: Optional[dict[str, Any]]) -> dict[str, Any]:
+    if not atom:
+        return fields
+    out = dict(fields)
+    for k in _ATOM_DEFAULT_KEYS:
+        if out.get(k) in (None, "", [], {}):
+            v = atom.get(k)
+            if v not in (None, "", [], {}):
+                out[k] = v
+    return out
+
+
 # --- plan validation -----------------------------------------------------------------
 
-def validate_plan(plan: dict[str, Any], batch_pids: set[str], graph_root: str) -> list[str]:
-    """Schema + coverage errors. [] means the plan is safe to apply."""
+def validate_plan(plan: dict[str, Any], batch_pids: set[str], graph_root: str,
+                  team: Optional[str] = None) -> list[str]:
+    """Schema + coverage errors. [] means the plan is safe to apply.
+
+    Cluster references are canonicalized IN PLACE to graph-root-relative ``<team>/<name>``
+    (bare names get ``team`` prefixed when given) so apply operates on validated paths only."""
     errors: list[str] = []
     if not isinstance(plan, dict):
         return ["plan must be an object"]
@@ -134,10 +199,14 @@ def validate_plan(plan: dict[str, Any], batch_pids: set[str], graph_root: str) -
             if not cluster and not fields.get("new_cluster"):
                 errors.append(f"{pid}: {op} requires cluster (or fields.new_cluster: true)")
             elif cluster:
-                cpath = Path(cluster) if Path(cluster).is_absolute() else Path(graph_root) / cluster
-                if not cpath.is_dir() and not fields.get("new_cluster"):
-                    errors.append(f"{pid}: cluster {cluster!r} does not exist "
-                                  "(set fields.new_cluster: true to create it)")
+                canon, cerr = _canon_cluster(graph_root, cluster, team)
+                if cerr:
+                    errors.append(f"{pid}: {cerr}")
+                else:
+                    d["cluster"] = canon
+                    if not (Path(graph_root) / canon).is_dir() and not fields.get("new_cluster"):
+                        errors.append(f"{pid}: cluster {canon!r} does not exist "
+                                      "(set fields.new_cluster: true to create it)")
             if op == "supersede":
                 old_id = d.get("old_id")
                 if not old_id:
@@ -152,6 +221,12 @@ def validate_plan(plan: dict[str, Any], batch_pids: set[str], graph_root: str) -
                 errors.append(f"{pid}: merge id must not be a stg- id")
             if not d.get("cluster"):
                 errors.append(f"{pid}: merge requires cluster")
+            else:
+                canon, cerr = _canon_cluster(graph_root, d["cluster"], team)
+                if cerr:
+                    errors.append(f"{pid}: {cerr}")
+                else:
+                    d["cluster"] = canon
             changes = d.get("changes")
             if not isinstance(changes, dict):
                 errors.append(f"{pid}: merge requires changes")
@@ -171,6 +246,12 @@ def validate_plan(plan: dict[str, Any], batch_pids: set[str], graph_root: str) -
                 errors.append(f"{pid}: resurrect id must not be a stg- id")
             if not d.get("cluster"):
                 errors.append(f"{pid}: resurrect requires cluster")
+            else:
+                canon, cerr = _canon_cluster(graph_root, d["cluster"], team)
+                if cerr:
+                    errors.append(f"{pid}: {cerr}")
+                else:
+                    d["cluster"] = canon
         elif op == "drop_dup":
             if not d.get("dup_of"):
                 errors.append(f"{pid}: drop_dup requires dup_of")
@@ -198,6 +279,15 @@ def validate_plan(plan: dict[str, Any], batch_pids: set[str], graph_root: str) -
             fields = piece.get("fields") if isinstance(piece, dict) else None
             if not isinstance(fields, dict) or not str(fields.get("title") or "").strip():
                 errors.append(f"{pid}: splits pieces[{j}] requires fields.title")
+            pcluster = (piece.get("cluster") if isinstance(piece, dict) else None) or split.get("cluster")
+            if pcluster:
+                canon, cerr = _canon_cluster(graph_root, pcluster, team)
+                if cerr:
+                    errors.append(f"{pid}: splits pieces[{j}]: {cerr}")
+                elif isinstance(piece, dict) and piece.get("cluster"):
+                    piece["cluster"] = canon
+                else:
+                    split["cluster"] = canon
 
     # `apply()` dereferences both of these with `.get(...)` unconditionally (mnx_promote.py
     # ~410-417) — a wrong JSON type here must fail validation cleanly, not raise a raw
@@ -281,7 +371,7 @@ def begin(binding: Optional["mnx_binding.Binding"] = None, team: Optional[str] =
     binding, team_name, team_path = _resolve(binding, team)
     graph_root = binding.graph_root()
     label = ingest_batch or "_session"
-    stamps_flushed = mnx_stamp.flush()
+    stamps_flushed = mnx_stamp.flush(binding=binding)
 
     unpushed = mnx_binding.unpushed_state(binding)
     if unpushed.get("unpushed"):
@@ -412,10 +502,13 @@ def apply(plan: dict[str, Any], approved: bool = True,
     if not mnx_lock.held(team_path):
         raise ValueError(f"team lock not held for {team_name!r} — call begin() first")
 
-    batch_pids = {a["provisional_id"]
-                 for a in mnx_stage.list_atoms(binding=binding,
-                                               label=ingest_batch or "_session")["atoms"]}
-    errors = validate_plan(plan, batch_pids, graph_root)
+    # overlay (not list_atoms): it carries each atom's body, needed for the create/supersede
+    # field defaults below (H2 — a minimal plan must inherit the staged content, not husk it).
+    batch_atoms = {a["provisional_id"]: a
+                   for a in mnx_stage.overlay(binding=binding,
+                                              label=ingest_batch or "_session")["atoms"]}
+    batch_pids = set(batch_atoms)
+    errors = validate_plan(plan, batch_pids, graph_root, team=team_name)
     if errors:
         return {"action": "rejected", "reason": "validation", "errors": errors}
 
@@ -476,7 +569,7 @@ def apply(plan: dict[str, Any], approved: bool = True,
         pid, op = d["pid"], d["op"]
         if op == "create":
             cluster = _cluster_path(graph_root, d["cluster"])
-            res = mnx_node.create(cluster, d["fields"])
+            res = mnx_node.create(cluster, _with_atom_defaults(d["fields"], batch_atoms.get(pid)))
             _touch(cluster)
             _note(cluster, res["id"], "create")
             pid_to_id[pid] = res["id"]
@@ -490,7 +583,8 @@ def apply(plan: dict[str, Any], approved: bool = True,
             disposition_summary.append({"pid": pid, "op": op, "id": d["id"]})
         elif op == "supersede":
             cluster = _cluster_path(graph_root, d["cluster"])
-            res = mnx_node.supersede(d["old_id"], cluster, d["fields"])
+            res = mnx_node.supersede(d["old_id"], cluster,
+                                     _with_atom_defaults(d["fields"], batch_atoms.get(pid)))
             _touch(cluster)
             _note(cluster, res["new_id"], "create")
             _repoint_referrers(d["old_id"])
@@ -655,6 +749,7 @@ _USAGE = [
     "mnx_promote.py abort [--team <t>]                               — release lock, drop the plan",
 ]
 _FLAGS = {"--team": True, "--pids": True, "--clusters": True, "--json": False, "--json-file": True,
+          "--binding-session": True,
           "--ingest-batch": True}
 
 
@@ -665,22 +760,26 @@ def _main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else ""
     team = _arg(argv, "--team")
     ingest_batch = _arg(argv, "--ingest-batch")
+    # --binding-session <sid>: honor a mid-session graph switch (use-graph) so the whole
+    # promote transaction runs against the session's ACTIVE graph (E2E 2026-07-19, H4).
+    sid = _arg(argv, "--binding-session")
+    b = mnx_binding.resolve(session_id=sid) if sid else None
     try:
         if cmd == "begin":
-            return mnx_common.emit(begin(team=team, ingest_batch=ingest_batch))
+            return mnx_common.emit(begin(binding=b, team=team, ingest_batch=ingest_batch))
         if cmd == "context":
             pids = (_arg(argv, "--pids") or "").split(",") if _arg(argv, "--pids") else None
             clusters = (_arg(argv, "--clusters") or "").split(",") if _arg(argv, "--clusters") else None
-            return mnx_common.emit(context(team=team, pids=pids, clusters=clusters,
+            return mnx_common.emit(context(binding=b, team=team, pids=pids, clusters=clusters,
                                            ingest_batch=ingest_batch))
         if cmd == "apply":
             plan = _json_stdin(argv)
-            res = apply(plan, team=team, ingest_batch=ingest_batch)
+            res = apply(plan, binding=b, team=team, ingest_batch=ingest_batch)
             return mnx_common.emit(res, ok=res.get("action") not in ("rejected",))
         if cmd == "retry-push":
-            return mnx_common.emit(retry_push(team=team))
+            return mnx_common.emit(retry_push(binding=b, team=team))
         if cmd == "abort":
-            return mnx_common.emit(abort(team=team))
+            return mnx_common.emit(abort(binding=b, team=team))
         return mnx_common.emit({"error": f"unknown subcommand: {cmd}"}, ok=False)
     except Exception as exc:
         return mnx_common.emit({"error": str(exc)}, ok=False)

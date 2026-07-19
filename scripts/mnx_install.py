@@ -340,8 +340,10 @@ def _adapt_opencode(scope: str, project_root: Path, pin_env: Optional[dict],
     entry = _entry_opencode(pin_env)
     plan.changes.append(_json_change(cfg_path, "mcp", entry, uninstall=uninstall,
                                       label=f"MCP server entry ({cfg_path.name})"))
-    plan.changes.append(_md_change(project_root / "AGENTS.md", uninstall=uninstall,
-                                    label="instruction block (AGENTS.md)"))
+    md_path = (project_root / "AGENTS.md" if scope == "project"
+               else Path.home() / ".config" / "opencode" / "AGENTS.md")
+    plan.changes.append(_md_change(md_path, uninstall=uninstall,
+                                    label=f"instruction block ({md_path})"))
     if scope == "project":
         plugin_dst = project_root / ".opencode" / "plugin" / "mnemex.ts"
         # Checkout-relative first, falls back to the bundled package copy (plan v2 §7,
@@ -372,8 +374,10 @@ def _adapt_gemini_cli(scope: str, project_root: Path, pin_env: Optional[dict],
     entry = _entry_mcpservers(pin_env)
     plan.changes.append(_json_change(cfg_path, "mcpServers", entry, uninstall=uninstall,
                                       label=f"MCP server entry ({cfg_path})"))
-    plan.changes.append(_md_change(project_root / "GEMINI.md", uninstall=uninstall,
-                                    label="instruction block (GEMINI.md)"))
+    md_path = (project_root / "GEMINI.md" if scope == "project"
+               else Path.home() / ".gemini" / "GEMINI.md")
+    plan.changes.append(_md_change(md_path, uninstall=uninstall,
+                                    label=f"instruction block ({md_path})"))
     return plan
 
 
@@ -390,8 +394,10 @@ def _adapt_codex(scope: str, project_root: Path, pin_env: Optional[dict],
             cfg_path, table, _toml_table_body(MCP_COMMAND, MCP_ARGS, env=pin_env))
     plan.changes.append(FileChange(path=cfg_path, new_text=new_text, changed=changed,
                                     label=f"MCP server entry ({cfg_path})"))
-    plan.changes.append(_md_change(project_root / "AGENTS.md", uninstall=uninstall,
-                                    label="instruction block (AGENTS.md)"))
+    md_path = (project_root / "AGENTS.md" if scope == "project"
+               else Path.home() / ".codex" / "AGENTS.md")
+    plan.changes.append(_md_change(md_path, uninstall=uninstall,
+                                    label=f"instruction block ({md_path})"))
     if scope == "project":
         plan.notes.append("Project-scoped .codex/config.toml is honored by Codex only for "
                            "trusted projects (upstream docs) — trust the project if the entry "

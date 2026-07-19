@@ -45,6 +45,24 @@ commit.
 
 </div>
 
+### ⏱️ 60-second quickstart
+
+```bash
+# Claude Code (the full plugin experience — auto-capture hooks, skills):
+/plugin marketplace add kritird/OpenMnemex
+/plugin install mnemex@mnemex-marketplace
+/mnemex:mnx-init          # scaffold or bind a graph (guided; a plain local folder by default)
+
+# Any other agent (OpenCode / Gemini CLI / Codex / Copilot / Cursor) — one command,
+# creates a local-folder graph, binds it, and pins it into the MCP entry, zero prompts:
+uvx openmnemex install --agent <agent> --init-graph --yes
+```
+
+Then just work: the first read on the empty graph offers to **seed it from a repo/docs** — or skip
+that and it fills episodically as you go. Full detail: [Install](#-install) below,
+[`docs/agent-setup.md`](docs/agent-setup.md) per agent, [`docs/user-journey.md`](docs/user-journey.md)
+for the day-to-day loop.
+
 ---
 
 ## 💡 Why this exists

@@ -266,7 +266,7 @@ def _graph_label(binding) -> str:
     return binding.remote or binding.local_path or "graph"
 
 
-def _flush_usage_stamps() -> dict:
+def _flush_usage_stamps(binding=None) -> dict:
     """Best-effort batched flush of pending remote usage stamps. Never raises.
 
     mnx-read appends stamps to a session-durable spill outside the clone (see mnx_stamp);
@@ -274,7 +274,7 @@ def _flush_usage_stamps() -> dict:
     no longer commit+push per stamp and the signal survives the session-start reset.
     """
     try:
-        return mnx_stamp.flush()
+        return mnx_stamp.flush(binding=binding)
     except Exception as exc:
         return {"action": "skipped", "error": str(exc)}
 

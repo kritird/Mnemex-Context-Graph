@@ -411,15 +411,25 @@ def manifest_write(graph_root: str, source_slug_: str, files: dict[str, Any],
 
 
 def delta(root: str, manifest: str, include: Optional[str] = None,
-          exclude: Optional[str] = None, max_bytes: int = MAX_BYTES_DEFAULT) -> dict[str, Any]:
+          exclude: Optional[str] = None, max_bytes: int = MAX_BYTES_DEFAULT,
+          allow_missing_manifest: bool = False) -> dict[str, Any]:
     """Diff the walked source against a prior manifest at FILE granularity.
 
     added   = files present now, absent from the manifest
     changed = files whose content hash differs from the manifest
     orphans = files in the manifest that are gone from the source now (their node_ids surface as
-              orphan CANDIDATES — never auto-tombstoned; the human decides)."""
+              orphan CANDIDATES — never auto-tombstoned; the human decides)
+
+    A manifest path that does not exist raises unless ``allow_missing_manifest=True`` — a
+    typo'd path silently meaning "everything is new" re-imports the whole corpus as
+    duplicates (E2E 2026-07-19, M5). Callers that legitimately expect a first import (no
+    manifest yet) pass the flag and get ``first_import: true`` in the result."""
     rootp = Path(root).resolve()
     inc, exc = _globs(include), _globs(exclude)
+    first_import = not (manifest and Path(manifest).is_file())
+    if first_import and not allow_missing_manifest:
+        raise ValueError(f"manifest not found: {manifest!r} — pass the path written by "
+                         "manifest-write (or allow_missing_manifest for a first import)")
     man = read_manifest(manifest)
     man_files: dict[str, Any] = man.get("files", {})
     seen: set[str] = set()
@@ -445,7 +455,10 @@ def delta(root: str, manifest: str, include: Optional[str] = None,
             unchanged += 1
     orphans = [{"path": rel, "node_ids": man_files[rel].get("nodes", [])}
                for rel in sorted(man_files) if rel not in seen]
-    return {"added": added, "changed": changed, "unchanged": unchanged, "orphans": orphans}
+    out = {"added": added, "changed": changed, "unchanged": unchanged, "orphans": orphans}
+    if first_import:
+        out["first_import"] = True
+    return out
 
 
 # --- cli --------------------------------------------------------------------
@@ -471,12 +484,17 @@ def _main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else ""
     try:
         if cmd == "acquire":
+            if not _arg(argv, "--source"):
+                return mnx_common.emit({"error": "acquire needs --source <url-or-path>"}, ok=False)
             return mnx_common.emit(acquire(_arg(argv, "--source"), _arg(argv, "--cache")))
         if cmd == "probe":
             return mnx_common.emit(probe(
                 _arg(argv, "--root") or ".", _arg(argv, "--include"), _arg(argv, "--exclude"),
                 int(_arg(argv, "--max-bytes") or MAX_BYTES_DEFAULT)))
         if cmd == "delta":
+            if not _arg(argv, "--manifest"):
+                return mnx_common.emit({"error": "delta needs --manifest <path> (the file "
+                                        "manifest-write produced)"}, ok=False)
             return mnx_common.emit(delta(
                 _arg(argv, "--root") or ".", _arg(argv, "--manifest") or "",
                 _arg(argv, "--include"), _arg(argv, "--exclude"),

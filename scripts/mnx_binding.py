@@ -263,7 +263,7 @@ def _read_registry_rows(path: Path) -> list[dict[str, str]]:
         if len(parts) != 5:
             continue
         rows.append({"slug": parts[0], "kind": parts[1], "name": parts[2],
-                     "location": parts[3], "last_used": parts[4]})
+                     "location": parts[3], "registered": parts[4]})
     return rows
 
 
@@ -310,7 +310,7 @@ def _cache_scan_entries(known_slugs: set[str]) -> list[dict[str, str]]:
         remote = _read_origin_remote(entry)
         name = Binding("cache-scan", remote=remote).display_name() if remote else entry.name
         found.append({"slug": entry.name, "kind": "git-remote", "name": name,
-                      "location": remote or "", "last_used": ""})
+                      "location": remote or "", "registered": ""})
     return found
 
 
@@ -328,7 +328,7 @@ def list_graphs() -> list[dict[str, Any]]:
         else:
             present = bool(r["location"]) and Path(r["location"]).is_dir()
         out.append({**r, "present": present})
-    return sorted(out, key=lambda r: r["last_used"], reverse=True)
+    return sorted(out, key=lambda r: r["registered"], reverse=True)
 
 
 # --- session override (mid-session graph switch — onboarding plan Phase 5b) --

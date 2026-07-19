@@ -182,8 +182,8 @@ After approval, apply the plan **serially** under the lock in fixed order (truth
    to run `/mnemex:mnx-promote --retry-push` (push the existing commit); if it keeps failing, the
    `manual_fallback` git commands are the last resort. Stop here.
 5. **Settle staging only on a confirmed persist:** move each contradicting atom to the held queue
-   (`mnx_stage.py hold --id <pid> --reason … --contradicts <graph-id>`), then clear the atoms that
-   promoted (`mnx_stage.py clear-merged --ids <pid,pid,…>`). Do **not** use the all-or-nothing
+   (`mnx_stage.py hold --id <pid> --reason … --contradicts <graph-id> --binding-session <sid>`), then clear the atoms that
+   promoted (`mnx_stage.py clear-merged --ids <pid,pid,…> --binding-session <sid>`). Do **not** use the all-or-nothing
    `mnx_stage.py clear` on the per-atom path — it would discard the held atoms too. Remove
    `pass.plan.json`, release the lock. (`mnx_doctor.py check-staging` / `mnx_stage.py held-list` confirms what remains.)
 
@@ -198,13 +198,13 @@ promote modes share; this SKILL does not hand-drive `mnx_node`/`mnx_lock`/`mnx_m
 itself for bulk (see Step 5 above — that is what `apply()` now does internally). Background:
 `docs/corpus-ingestion.md` §6.
 
-1. **Begin:** `mnx_promote.py begin --ingest-batch <id>` — preflight (unpushed guard, stranded-plan
+1. **Begin:** `mnx_promote.py begin --ingest-batch <id> --binding-session <sid>` (the session id from preflight; honors a mid-session graph switch) — preflight (unpushed guard, stranded-plan
    recovery) then the team lock, same as Step "Preflight" above. A `guard: empty-batch` result means
    nothing is staged under that id yet (stage some via `mnx_ingest`/`capture_add ingest_batch=<id>`, or
    check the id). A `guard: ingest-batch` result from a *plain* `begin()` (no `--ingest-batch`) means only
    bulk atoms are staged — it now **names this same command** as the fix, not a hand-driven fallback.
 2. **Context + fork reconcile per cluster (judgment, unchanged from episodic).** `mnx_promote.py context
-   --ingest-batch <id>` returns the batch + near-matches + cluster index + mesh preview, same shape as
+   --ingest-batch <id> --binding-session <sid>` returns the batch + near-matches + cluster index + mesh preview, same shape as
    episodic. The reconcile sub-agent contract already permits forking — *plan in parallel, apply serially
    under the lock* — so draft the plan per cluster if the batch is large. ER already collapsed intra-batch
    duplicates before staging (one entity → one node), so each fork mostly assigns CREATE/MERGE.
@@ -213,8 +213,12 @@ itself for bulk (see Step 5 above — that is what `apply()` now does internally
    (the ER `possible` band → `⚠ suggested`), and new-cluster creation.** **Auto-accept the plain
    CREATE/MERGE** — there is no per-atom review at corpus scale. The plan JSON is the identical shape Step 4
    describes (`dispositions`/`splits`/`links`/`consolidate`) — every pid this batch's `begin()` returned
-   must get exactly one disposition, same validation as episodic.
-4. **Apply — one transaction call.** `mnx_promote.py apply <plan> --ingest-batch <id>`. This is the
+   must get exactly one disposition, same validation as episodic. Each disposition's `cluster` is a
+   graph-root-relative `<team>/<cluster-name>` path (a bare name is auto-prefixed with the batch's team;
+   `fields.new_cluster: true` creates a missing one); a create/supersede's unset content fields
+   (summary/body/aliases/domain/…) are inherited from the staged atom, so a summarized plan never
+   drops captured content — still write them explicitly wherever reconcile improved the wording.
+4. **Apply — one transaction call.** `mnx_promote.py apply <plan> --ingest-batch <id> --binding-session <sid>`. This is the
    engine's Step-5 sequence in fixed order (node writes → `mnx_mesh` links → consolidate → regen indexes/
    cross-links/phonebook → doctor gate, rolls back on E>0 → `mnx_binding.py persist` → per-atom settle) —
    the same call episodic promote makes, just scoped to this batch's pids. A `committed-not-pushed` result

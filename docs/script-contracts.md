@@ -82,7 +82,7 @@ write_user_default(path|remote, force=False, default_team?, author?) -> {ok, act
 register_graph(binding) -> {registered: bool, slug?, reason?, error?}
     # best-effort append to <mnemex home>/graphs.md if `binding.slug()` isn't already listed. NEVER
     # raises. Called by sync() (non-error actions only) and mnx_init.init_graph.
-list_graphs() -> [{slug, kind, name, location, last_used, present}, ...]
+list_graphs() -> [{slug, kind, name, location, registered, present}, ...]
     # the registry UNIONED with a scan of graphs_cache_root() for clones the registry missed. Bounded
     # to that one dir — no filesystem-wide search. `present`: clone exists (remote) / folder exists
     # (local). Works with no binding at all.
@@ -252,6 +252,11 @@ ts order; a `revalidated` delta moves `verified` forward only (never touches str
 
 ## 📝 `mnx_stamp.py` — durable usage stamping (the read-side write)
 
+> **Session override routing (H4, E2E 2026-07-19):** `mnx_stage.py`, `mnx_stamp.py`, and
+> `mnx_promote.py` all accept `--binding-session <sid>` (and their Python entry points accept
+> `binding=`/`session_id=`) so a mid-session `use-graph` switch routes captures, stamps, and the
+> promote transaction to the session's ACTIVE graph — self-resolving without it was the H4 misroute.
+
 The only write a read performs. A *stamp* is one append-only registry line `{id} {ts} {role} {weight}`.
 For a **git-remote** graph the clone is hard-reset to remote HEAD every session start, so a stamp
 written straight to the registry dies unless committed **and** pushed; `mnx_stamp` instead spills
@@ -330,9 +335,12 @@ probe(root, include=None, exclude=None, max_bytes=1048576)
     # classify (doc|interface|code-doc|config|skip) by ext+path; chunk docs by h2 headings and code by
     # EXPORTED symbol (private/underscore symbols are never emitted); a secret file is COUNTED
     # (skipped_secrets) and its bytes are NEVER opened.
-delta(root, manifest, include=None, exclude=None) -> {added[], changed[], unchanged, orphans:[{path, node_ids}]}
+delta(root, manifest, include=None, exclude=None, allow_missing_manifest=False)
+    -> {added[], changed[], unchanged, orphans:[{path, node_ids}], first_import?}
     # file-granularity diff of walked content-hashes vs the manifest; a deleted file's node_ids surface as
-    # orphan CANDIDATES (never auto-tombstoned — the human decides).
+    # orphan CANDIDATES (never auto-tombstoned — the human decides). A manifest path that does not exist
+    # RAISES unless allow_missing_manifest=True (then first_import: true) — a typo'd path silently meaning
+    # 'everything is new' would re-import the whole corpus (E2E 2026-07-19, M5). The CLI requires --manifest.
 manifest_write(graph_root, source_slug, files, source_repo=None, last_commit=None) -> {path, files}
     # merges into <graph>/.mnemex/ingest/<slug>.json (protocol state, committed with the graph beside highwater).
 source_slug(source) -> 'name-<sha1[:8]>'   # mirrors mnx_binding.graph_slug's scheme
@@ -428,10 +436,16 @@ context(binding=None, team=None, pids=None, clusters=None, ingest_batch=None)
     -> {team, batch, near_matches, cluster_index, mesh_preview}
     # everything the reconcile judgment needs: the staged batch (optionally filtered by pids/clusters),
     # mnx_simindex near-match candidates per atom, routed cluster index rows, a mnx_mesh link-plan preview.
-validate_plan(plan, batch_pids, graph_root) -> list[str]   # [] = valid; schema + FULL-COVERAGE (every
-    # batch_pid disposed exactly once, no disposition references a pid outside the batch)
+validate_plan(plan, batch_pids, graph_root, team=None) -> list[str]   # [] = valid; schema + FULL-COVERAGE (every
+    # batch_pid disposed exactly once, no disposition references a pid outside the batch). Cluster refs are
+    # canonicalized IN PLACE to graph-root-relative '<team>/<name>': a bare name gets `team` prefixed, an
+    # absolute path must sit inside the graph root, and the team directory must exist — a bare/root-level
+    # cluster can no longer land outside every team (E2E 2026-07-19, H3).
 apply(plan, approved=True, binding=None, team=None, ingest_batch=None)
     -> {action: applied|rejected|committed-not-pushed, ...}
+    # create/supersede fields left unset (summary/body/aliases/domain/type/volatility/trigger/mentions/
+    # provenance) are inherited from the staged atom — a schema-minimal plan ({title} only) can no longer
+    # mint a content-empty husk node (E2E 2026-07-19, H2). Explicit fields always win.
     # 1 validate 2 write pass.plan.json 3 mnx_node truth writes 4 mnx_mesh.apply_links 5 consolidate
     # (approved-death tombstones) 6 regen indexes/cross-links/phonebook + the TEAM ROUTER index (its
     # Children listing — matters whenever a disposition creates a brand-new cluster, e.g. an all-CREATE

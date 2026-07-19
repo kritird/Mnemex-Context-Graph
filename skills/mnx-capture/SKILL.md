@@ -142,7 +142,7 @@ promote** — artifact ref, the specific review ids, rejected alternative(s), th
 session timestamp:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stage.py" add --json <<'JSON'
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stage.py" add --binding-session <sid> --json <<'JSON'
 { "type": "pattern",
   "summary": "Reconcile settlement before posting",
   "aliases": ["settle-recon"],

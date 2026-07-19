@@ -84,8 +84,11 @@ _CORPUS_PROV_KEYS = ("source_repo", "commit_sha", "source_path", "anchor", "kind
 
 # --- location ----------------------------------------------------------------
 
-def _binding():
-    b = mnx_binding.resolve()
+def _binding(session_id: Optional[str] = None):
+    # session_id makes a per-session graph override (use-graph, onboarding plan Phase 5b)
+    # visible here — without it a capture after a mid-session switch stages into the
+    # PREVIOUS graph's side-store (E2E 2026-07-19, H4).
+    b = mnx_binding.resolve(session_id=session_id)
     if b is None:
         raise RuntimeError("No Mnemex graph configured. Run /mnemex:mnx-init.")
     return b
@@ -318,9 +321,12 @@ def status(binding=None) -> dict[str, Any]:
 
 # --- operations --------------------------------------------------------------
 
-def add(atom: dict[str, Any]) -> dict[str, Any]:
-    """Stage one atom. Idempotent by content hash. Refuses (backpressure) past the HARD cap."""
-    binding = _binding()
+def add(atom: dict[str, Any], binding=None, session_id: Optional[str] = None) -> dict[str, Any]:
+    """Stage one atom. Idempotent by content hash. Refuses (backpressure) past the HARD cap.
+
+    Pass ``binding`` (or ``session_id``) so a session graph override routes the atom to the
+    ACTIVE graph's staging — self-resolving here was the H4 misroute (E2E 2026-07-19)."""
+    binding = binding or _binding(session_id)
     norm = _normalize(atom)
     pid = provisional_id(norm)
     path = _atom_path(binding, pid)
@@ -614,8 +620,9 @@ _USAGE = [
     'mnx_stage.py clear-merged --ids <pid,pid,...>     — drop atoms merged by a promote',
     'mnx_stage.py hold --id <pid> [--reason r] [--contradicts <node-id>]  — park a contradicting atom',
     'mnx_stage.py held-list | release-held --id <pid> | drop-held --id <pid>',
+    'every subcommand also takes --binding-session <sid>  — honor a mid-session graph switch (use-graph)',
 ]
-_FLAGS = {"--json": False, "--urgent": False, "--type": True, "--summary": True, "--aliases": True, "--domain": True, "--trigger": True, "--score": True, "--volatility": True, "--body": True, "--ingest-batch": True, "--source-repo": True, "--commit-sha": True, "--source-path": True, "--anchor": True, "--kind": True, "--artifact": True, "--reviews": True, "--rejected": True, "--rationale": True, "--session": True, "--id": True, "--ids": True, "--reason": True, "--contradicts": True}
+_FLAGS = {"--json": False, "--urgent": False, "--type": True, "--summary": True, "--aliases": True, "--domain": True, "--trigger": True, "--score": True, "--volatility": True, "--body": True, "--ingest-batch": True, "--source-repo": True, "--commit-sha": True, "--source-path": True, "--anchor": True, "--kind": True, "--artifact": True, "--reviews": True, "--rejected": True, "--rationale": True, "--session": True, "--id": True, "--ids": True, "--reason": True, "--contradicts": True, "--binding-session": True}
 
 
 def _main(argv: list[str]) -> int:
@@ -625,43 +632,46 @@ def _main(argv: list[str]) -> int:
     if yaml is None:
         return mnx_common.emit({"error": "PyYAML is required (pip install pyyaml)."}, ok=False)
     cmd = argv[1] if len(argv) > 1 else ""
+    # --binding-session <sid>: honor a mid-session graph switch (use-graph) — every
+    # subcommand below must act on the SAME graph the rest of that session acts on (H4).
+    b = _binding(_arg(argv, "--binding-session")) if _arg(argv, "--binding-session") else None
     try:
         if cmd == "add":
             if "--json" in argv:
                 atom = json.loads(sys.stdin.read() or "{}")
             else:
                 atom = _atom_from_argv(argv)
-            res = add(atom)
+            res = add(atom, binding=b)
             return mnx_common.emit(res, ok=res.get("action") != "refused")
         if cmd == "list":
-            return mnx_common.emit(list_atoms(label=_arg(argv, "--ingest-batch")))
+            return mnx_common.emit(list_atoms(binding=b, label=_arg(argv, "--ingest-batch")))
         if cmd in ("status", "size-check"):
-            return mnx_common.emit(status())
+            return mnx_common.emit(status(binding=b))
         if cmd == "overlay":
             doms = _as_list(_arg(argv, "--domain"))
-            return mnx_common.emit(overlay(doms, label=_arg(argv, "--ingest-batch")))
+            return mnx_common.emit(overlay(doms, binding=b, label=_arg(argv, "--ingest-batch")))
         if cmd == "clear":
-            return mnx_common.emit(clear(label=_arg(argv, "--ingest-batch")))
+            return mnx_common.emit(clear(binding=b, label=_arg(argv, "--ingest-batch")))
         if cmd == "clear-one":
             pid = _arg(argv, "--id")
             if not pid:
                 return mnx_common.emit({"error": "clear-one needs --id <provisional-id>"}, ok=False)
-            return mnx_common.emit(clear_one(pid))
+            return mnx_common.emit(clear_one(pid, binding=b))
         if cmd == "clear-merged":
             ids = [s for s in (_arg(argv, "--ids") or "").split(",") if s]
-            return mnx_common.emit(clear_merged(ids))
+            return mnx_common.emit(clear_merged(ids, binding=b))
         if cmd == "hold":
             pid = _arg(argv, "--id")
             if not pid:
                 return mnx_common.emit({"error": "hold needs --id <provisional-id>"}, ok=False)
             return mnx_common.emit(hold(pid, _arg(argv, "--reason") or "contradiction",
-                                        _arg(argv, "--contradicts")))
+                                        _arg(argv, "--contradicts"), binding=b))
         if cmd == "held-list":
-            return mnx_common.emit(held_status())
+            return mnx_common.emit(held_status(binding=b))
         if cmd == "release-held":
-            return mnx_common.emit(release_held(_arg(argv, "--id")))
+            return mnx_common.emit(release_held(_arg(argv, "--id"), binding=b))
         if cmd == "drop-held":
-            return mnx_common.emit(drop_held(_arg(argv, "--id")))
+            return mnx_common.emit(drop_held(_arg(argv, "--id"), binding=b))
         return mnx_common.emit({"error": f"unknown subcommand: {cmd}"}, ok=False)
     except Exception as exc:
         return mnx_common.emit({"error": str(exc)}, ok=False)

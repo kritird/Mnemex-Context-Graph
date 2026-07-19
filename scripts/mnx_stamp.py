@@ -55,9 +55,13 @@ def _fmt(nid: str, ts: str, role: str, weight: float) -> str:
 # --- append -----------------------------------------------------------------
 
 def append(cluster: str, nid: str, role: str,
-           weight: float = 1.0, ts: Optional[str] = None) -> dict[str, Any]:
-    """Record one usage stamp against `cluster`'s registry, durably for its graph kind."""
-    binding = mnx_binding.resolve()
+           weight: float = 1.0, ts: Optional[str] = None,
+           binding=None, session_id: Optional[str] = None) -> dict[str, Any]:
+    """Record one usage stamp against `cluster`'s registry, durably for its graph kind.
+
+    Pass ``binding``/``session_id`` so a session graph override spills to the ACTIVE graph's
+    side-store, not the previous one's (E2E 2026-07-19, H4)."""
+    binding = binding or mnx_binding.resolve(session_id=session_id)
     if binding is None:
         return {"action": "error", "message": "No Mnemex graph configured."}
     ts = ts or mnx_common.now_utc()
@@ -103,9 +107,10 @@ def _idempotent_append(reg: Path, lines: list[str]) -> None:
     reg.write_text("\n".join(kept + lines) + "\n", encoding="utf-8")
 
 
-def flush(message: str = "read: usage stamps (batched)") -> dict[str, Any]:
+def flush(message: str = "read: usage stamps (batched)",
+          binding=None, session_id: Optional[str] = None) -> dict[str, Any]:
     """Replay the spill into the registries and persist; clear the spill only on success."""
-    binding = mnx_binding.resolve()
+    binding = binding or mnx_binding.resolve(session_id=session_id)
     if binding is None:
         return {"action": "noop", "reason": "no graph configured"}
     if binding.kind() != "git-remote":
@@ -141,8 +146,8 @@ def flush(message: str = "read: usage stamps (batched)") -> dict[str, Any]:
     return out
 
 
-def status() -> dict[str, Any]:
-    binding = mnx_binding.resolve()
+def status(binding=None, session_id: Optional[str] = None) -> dict[str, Any]:
+    binding = binding or mnx_binding.resolve(session_id=session_id)
     if binding is None:
         return {"resolved": False}
     kind = binding.kind()
@@ -163,7 +168,8 @@ _USAGE = [
     'mnx_stamp.py flush [--message <m>]   — write queued stamps through to the graph',
     'mnx_stamp.py status                  — queued-stamp state',
 ]
-_FLAGS = {"--cluster": True, "--id": True, "--role": True, "--weight": True, "--message": True}
+_FLAGS = {"--cluster": True, "--id": True, "--role": True, "--weight": True, "--message": True,
+          "--binding-session": True}
 
 
 def _main(argv: list[str]) -> int:
@@ -179,12 +185,14 @@ def _main(argv: list[str]) -> int:
             w = _arg(argv, "--weight")
             if not cluster or not nid:
                 return mnx_common.emit({"error": "append needs --cluster and --id"}, ok=False)
-            res = append(cluster, nid, role, float(w) if w else 1.0)
+            res = append(cluster, nid, role, float(w) if w else 1.0,
+                         session_id=_arg(argv, "--binding-session"))
             return mnx_common.emit(res, ok=res.get("action") != "error")
         if cmd == "flush":
-            return mnx_common.emit(flush(_arg(argv, "--message") or "read: usage stamps (batched)"))
+            return mnx_common.emit(flush(_arg(argv, "--message") or "read: usage stamps (batched)",
+                                         session_id=_arg(argv, "--binding-session")))
         if cmd == "status":
-            return mnx_common.emit(status())
+            return mnx_common.emit(status(session_id=_arg(argv, "--binding-session")))
         return mnx_common.emit({"error": f"unknown subcommand: {cmd}"}, ok=False)
     except Exception as exc:
         return mnx_common.emit({"error": str(exc)}, ok=False)

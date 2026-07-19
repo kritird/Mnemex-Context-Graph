@@ -1,7 +1,12 @@
 ## Step 5 — Apply (serial, locked, atomic) → push → clear staging
 After Step 4's plan is approved by the human, call `promote_apply` with `plan` and
-`approved: true`. The engine executes the identical sequence, serially, under the lock, as
-one transaction:
+`approved: true`. In every disposition, `cluster` is a graph-root-relative
+`<team>/<cluster-name>` path (a bare name is auto-prefixed with the transaction's team;
+set `fields.new_cluster: true` to create one that does not exist yet). A create/supersede's
+`fields` needs `title`; any of summary/body/aliases/domain/type/volatility/trigger/mentions/
+provenance you leave unset are inherited from the staged atom — but prefer writing them
+explicitly when your reconcile judgment improved on the captured wording. The engine
+executes the identical sequence, serially, under the lock, as one transaction:
 1. Persist the node truth through `mnx_node` — one write per disposition (create / merge /
    supersede / resurrect / drop_dup / hold) — mints ids, stamps `created`/`updated`/`verified`
    from one clock, keeps a superseded/dead node's body. Then `mnx_mesh.apply_links` writes the

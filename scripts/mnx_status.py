@@ -171,7 +171,7 @@ def status(session_id: Optional[str] = None) -> dict[str, Any]:
 
     # pending usage stamps (un-pushed reads) — durability signal
     try:
-        st = mnx_stamp.status()
+        st = mnx_stamp.status(binding=binding)
         out["pending_stamps"] = st.get("pending", 0)
         out["stamp_durability"] = st.get("durability", "batched")
     except Exception:

@@ -74,6 +74,9 @@ INGEST SCOPE  source: github.com/acme/payments-service @ 9f3c1a  → graph: paym
   code_extract: gated   (public/documented/config-only; deep opt-in per subtree)
 ```
 
+Every cluster this map creates gets a **one-line description** (proposed here, written into the
+cluster's `index.md` header `> …` line after the bulk promote lands) — read routing decides on that
+line and index regeneration preserves it; never leave the scaffold placeholder.
 The **source-tree → cluster map** is the bulk analog of capture's per-atom `domain:` — approve/edit it
 **once** here, and every atom under a subtree inherits that placement. Routing still flows through the
 normal promote precedence (org→team match, `default_team` fallback); the map is a *default*, not a bypass.

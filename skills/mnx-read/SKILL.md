@@ -130,7 +130,7 @@ For each `contributed`/`consulted` node, record one usage stamp against that nod
 registry (a cross-cluster use stamps the foreign cluster, not the one you started in):
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stamp.py" append \
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stamp.py" append --binding-session <sid> \
   --cluster <home-cluster-path> --id <node-id> --role <contributed|consulted> [--weight w]
 ```
 
@@ -139,7 +139,7 @@ If you re-checked a **stale** atom (step 2) and confirmed it is **still correct*
 without touching heat:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stamp.py" append \
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/mnx_stamp.py" append --binding-session <sid> \
   --cluster <home-cluster-path> --id <node-id> --role revalidated --weight 0
 ```
 

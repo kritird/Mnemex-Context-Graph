@@ -169,7 +169,8 @@ Claude Code and confirm the `mnemex` tools show up alongside (or instead of) the
 uvx openmnemex install --agent opencode --project --yes
 ```
 Project scope writes `./opencode.json` (project config wins over the global one); `--user`
-writes `~/.config/opencode/opencode.json` instead.
+writes `~/.config/opencode/opencode.json` instead, and the instruction block goes to
+OpenCode's global `~/.config/opencode/AGENTS.md` (not a file in your current directory).
 
 **2. What changed:** three things, all in one run:
 - `opencode.json` gets an `mcp.mnemex` entry:
@@ -210,7 +211,9 @@ the tier table above and [`LIMITATIONS.md`](../LIMITATIONS.md) item 3 for exactl
 ```bash
 uvx openmnemex install --agent gemini-cli --project --yes
 ```
-Project scope writes `.gemini/settings.json`; `--user` writes `~/.gemini/settings.json`.
+Project scope writes `.gemini/settings.json`; `--user` writes `~/.gemini/settings.json`,
+with the instruction block in Gemini's global `~/.gemini/GEMINI.md` (not a file in your
+current directory).
 
 **2. What changed:**
 - `.gemini/settings.json` gets an `mcpServers.mnemex` entry:
@@ -237,7 +240,9 @@ only thing telling the model when to act.
 ```bash
 uvx openmnemex install --agent codex --project --yes
 ```
-Project scope writes `.codex/config.toml`; `--user` writes `~/.codex/config.toml`.
+Project scope writes `.codex/config.toml`; `--user` writes `~/.codex/config.toml`, with
+the instruction block in Codex's global `~/.codex/AGENTS.md` (not a file in your current
+directory).
 
 **2. What changed:**
 - `.codex/config.toml` gets an `[mcp_servers.mnemex]` table:

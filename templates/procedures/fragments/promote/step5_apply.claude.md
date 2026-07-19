@@ -23,8 +23,8 @@ After approval, apply the plan **serially** under the lock in fixed order (truth
    to run `/mnemex:mnx-promote --retry-push` (push the existing commit); if it keeps failing, the
    `manual_fallback` git commands are the last resort. Stop here.
 5. **Settle staging only on a confirmed persist:** move each contradicting atom to the held queue
-   (`mnx_stage.py hold --id <pid> --reason … --contradicts <graph-id>`), then clear the atoms that
-   promoted (`mnx_stage.py clear-merged --ids <pid,pid,…>`). Do **not** use the all-or-nothing
+   (`mnx_stage.py hold --id <pid> --reason … --contradicts <graph-id> --binding-session <sid>`), then clear the atoms that
+   promoted (`mnx_stage.py clear-merged --ids <pid,pid,…> --binding-session <sid>`). Do **not** use the all-or-nothing
    `mnx_stage.py clear` on the per-atom path — it would discard the held atoms too. Remove
    `pass.plan.json`, release the lock. (`mnx_doctor.py check-staging` / `mnx_stage.py held-list` confirms what remains.)
 
