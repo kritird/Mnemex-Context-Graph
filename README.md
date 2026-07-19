@@ -1,4 +1,9 @@
-<p align="center"><img src="assets/banner.svg" alt="OpenMnemex" width="480"></p>
+<p>
+  <img src="assets/logo.svg" alt="OpenMnemex logo" width="170" align="left">
+  <img src="assets/banner.svg" alt="OpenMnemex" width="440" align="right">
+</p>
+<br clear="all">
+
 
 <p align="center"><b>Auto-memory for LLM agents — it decides what mattered and keeps it, so you don't have to. A self-pruning, human-memory-modeled knowledge context graph.</b></p>
 
