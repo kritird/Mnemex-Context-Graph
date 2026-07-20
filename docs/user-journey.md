@@ -56,8 +56,11 @@ flowchart LR
 ```
 
 ```bash
-# 1. Open the Console (installs on first run; Python 3.9+):
-uvx openmnemex                        # or: pip install openmnemex && openmnemex
+# 1. Open the Console (Python 3.9+). Run it without installing…
+uvx openmnemex
+#    …or install it once, then run it (two steps — `pip` only installs):
+pip install openmnemex
+openmnemex
 
 # 2. In the Console: create your first graph, then "Add agents" — one click per agent.
 #    For Claude Code the Console recommends the plugin and shows these to run inside it:

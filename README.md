@@ -47,7 +47,14 @@ commit.
 Everything starts at the **OpenMnemex Console** — a local web app that opens in your browser:
 
 ```bash
-uvx openmnemex          # or: pip install openmnemex && openmnemex
+uvx openmnemex            # runs it without installing anything
+```
+
+…or install it properly, then run it — two steps, because `pip` only installs:
+
+```bash
+pip install openmnemex
+openmnemex
 ```
 
 From the Console: create (or open) a graph, then go to **Add agents** — it detects the coding
@@ -299,7 +306,7 @@ ghosts are `[[links]]` nobody has written yet.
 </p>
 
 ```bash
-uvx openmnemex     # or: pip install openmnemex && openmnemex
+uvx openmnemex            # or, if you'd rather install it: pip install openmnemex
 ```
 
 Click any node for its mesh and full rendered atom; search the graph; open the **revalidation
@@ -329,8 +336,12 @@ Phase-by-phase breakdowns are in
 **Start with the Console** — it guides everything else:
 
 ```bash
-# 1. Open the OpenMnemex Console (installs on first run; needs Python 3.9+):
-uvx openmnemex                      # or: pip install openmnemex && openmnemex
+# 1. Open the OpenMnemex Console (needs Python 3.9+). Either run it without
+#    installing…
+uvx openmnemex
+#    …or install it once, then run it (two steps — `pip` only installs):
+pip install openmnemex
+openmnemex
 
 # 2. In the Console: create your first graph (or open an existing folder).
 
