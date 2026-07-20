@@ -7,7 +7,7 @@
 <p align="center"><b>Auto-memory for LLM agents — it decides what mattered and keeps it, so you don't have to. A self-pruning, human-memory-modeled knowledge context graph.</b></p>
 
 <p align="center">
-  <img alt="status" src="https://img.shields.io/badge/status-v0.1.0-success">
+  <a href="https://pypi.org/project/openmnemex/"><img alt="PyPI" src="https://img.shields.io/pypi/v/openmnemex?label=PyPI&color=success"></a>
   <img alt="license" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white">
   <img alt="claude code" src="https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2">
