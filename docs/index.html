@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenMnemex — Auto-memory for LLM agents</title>
+<meta name="description" content="OpenMnemex gives AI agents long-term memory that decides what mattered and keeps it — plain Markdown in a git repo. No vector database, no embedding pipeline, no server.">
+<meta property="og:title" content="OpenMnemex — Auto-memory for LLM agents">
+<meta property="og:description" content="Self-curating, token-frugal agent memory. Just Markdown in git — no vectors, no server, no infra.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M 16.9 4.9 A 8.6 8.6 0 1 0 20.6 11.9' fill='none' stroke='%232dd4bf' stroke-width='2.2' stroke-linecap='round'/%3E%3Ccircle cx='19.5' cy='7.5' r='3.2' fill='%23a855f7'/%3E%3C/svg%3E" type="image/svg+xml">
+<script>(function () {
+  try {
+    var t = localStorage.getItem("mnx-site-theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch (e) {}
+}());</script>
+<style>
+/* ── Theme tokens: mirror the OpenMnemex Console (viewer/static/css/theme.css) ── */
+:root{
+  color-scheme: light;
+  --bg:#fafaf9; --bg-panel:#ffffff; --bg-inset:#f5f5f4;
+  --border:#e7e5e4; --border-strong:#d6d3d1;
+  --text:#1c1917; --text-muted:#78716c; --text-faint:#a8a29e;
+  --teal:#0d9488; --teal-soft:#ccfbf1; --purple:#9333ea; --purple-soft:#f3e8ff;
+  --amber:#d97706; --red:#dc2626; --green:#0e7a0d;
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Inter",Roboto,"Helvetica Neue",sans-serif;
+  --font-mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --radius:12px; --radius-sm:8px;
+  --shadow-pop:0 8px 30px rgba(28,25,23,.10);
+  --shadow-soft:0 1px 2px rgba(28,25,23,.04),0 4px 16px rgba(28,25,23,.05);
+  --maxw:1080px;
+  --glow: radial-gradient(60% 55% at 50% 0%, rgba(13,148,136,.13), transparent 70%),
+          radial-gradient(45% 40% at 82% 8%, rgba(147,51,234,.12), transparent 70%);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#131211; --bg-panel:#1a1918; --bg-inset:#232120;
+    --border:#2a2827; --border-strong:#3b3836;
+    --text:#e7e5e4; --text-muted:#a8a29e; --text-faint:#6f6a66;
+    --teal:#2dd4bf; --teal-soft:#103f3a; --purple:#c084fc; --purple-soft:#3b2352;
+    --amber:#f59e0b; --red:#f87171; --green:#4ade80;
+    --shadow-pop:0 8px 30px rgba(0,0,0,.5);
+    --shadow-soft:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.35);
+    --glow: radial-gradient(60% 55% at 50% 0%, rgba(45,212,191,.12), transparent 70%),
+            radial-gradient(45% 40% at 82% 8%, rgba(192,132,252,.12), transparent 70%);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#131211; --bg-panel:#1a1918; --bg-inset:#232120;
+  --border:#2a2827; --border-strong:#3b3836;
+  --text:#e7e5e4; --text-muted:#a8a29e; --text-faint:#6f6a66;
+  --teal:#2dd4bf; --teal-soft:#103f3a; --purple:#c084fc; --purple-soft:#3b2352;
+  --amber:#f59e0b; --red:#f87171; --green:#4ade80;
+  --shadow-pop:0 8px 30px rgba(0,0,0,.5);
+  --shadow-soft:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.35);
+  --glow: radial-gradient(60% 55% at 50% 0%, rgba(45,212,191,.12), transparent 70%),
+          radial-gradient(45% 40% at 82% 8%, rgba(192,132,252,.12), transparent 70%);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--font-ui); line-height:1.6;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+a{color:inherit}
+.wrap{max-width:var(--maxw); margin:0 auto; padding:0 24px}
+.mono{font-family:var(--font-mono)}
+
+/* ── Nav ── */
+header.nav{
+  position:sticky; top:0; z-index:50;
+  backdrop-filter:saturate(160%) blur(12px);
+  background:color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom:1px solid var(--border);
+}
+.nav-inner{display:flex; align-items:center; gap:14px; height:60px; max-width:var(--maxw); margin:0 auto; padding:0 24px}
+.brand{display:flex; align-items:center; gap:10px; text-decoration:none}
+.brand svg{width:26px; height:26px; flex:none}
+/* Wordmark: exactly matches the Console header — lowercase mono, open=teal · mnemex=purple */
+.wordmark{font-family:var(--font-mono); font-weight:700; letter-spacing:.01em; font-size:1.02rem}
+.wordmark .wm-open{color:var(--teal)}
+.wordmark .wm-mnemex{color:var(--purple)}
+.nav-links{margin-left:auto; display:flex; align-items:center; gap:6px}
+.nav-links a{padding:8px 12px; border-radius:8px; font-size:.92rem; color:var(--text-muted); text-decoration:none; font-weight:500}
+.nav-links a:hover{color:var(--text); background:var(--bg-inset)}
+.nav-links a.ghbtn{border:1px solid var(--border-strong); color:var(--text)}
+.nav-links a.ghbtn:hover{border-color:var(--teal)}
+.theme-btn{margin-left:2px; width:36px; height:36px; border:1px solid var(--border); background:var(--bg-panel); border-radius:9px; cursor:pointer; color:var(--text-muted); display:grid; place-items:center; font-size:1rem}
+.theme-btn:hover{color:var(--text); border-color:var(--border-strong)}
+@media(max-width:720px){.nav-links a.hideable{display:none}}
+
+/* ── Hero ── */
+.hero{position:relative; overflow:hidden; padding:84px 0 64px; text-align:center}
+.hero::before{content:""; position:absolute; inset:0; background:var(--glow); pointer-events:none}
+.hero .wrap{position:relative}
+.eyebrow{display:inline-flex; align-items:center; gap:8px; font-size:.8rem; font-weight:600; letter-spacing:.02em;
+  color:var(--teal); background:var(--teal-soft); border:1px solid color-mix(in srgb,var(--teal) 30%, transparent);
+  padding:6px 14px; border-radius:999px; margin-bottom:22px}
+.eyebrow .dot{width:7px; height:7px; border-radius:50%; background:var(--purple)}
+h1.title{font-size:clamp(2.4rem,6vw,4.1rem); line-height:1.04; letter-spacing:-.035em; margin:.1em 0 .35em; font-weight:800}
+h1.title .grad{background:linear-gradient(96deg,var(--teal),var(--purple)); -webkit-background-clip:text; background-clip:text; color:transparent}
+.subtitle{max-width:660px; margin:0 auto; font-size:clamp(1.05rem,2.2vw,1.28rem); color:var(--text-muted)}
+.subtitle b{color:var(--text); font-weight:600}
+.cta-row{display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin:34px 0 12px}
+.btn{display:inline-flex; align-items:center; gap:9px; padding:13px 22px; border-radius:11px; font-weight:600; font-size:1rem; text-decoration:none; border:1px solid transparent; cursor:pointer; transition:transform .08s ease, box-shadow .2s ease}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:linear-gradient(94deg,var(--teal),var(--purple)); color:#fff; box-shadow:var(--shadow-pop)}
+.btn-primary:hover{box-shadow:0 10px 34px color-mix(in srgb,var(--teal) 40%, transparent)}
+.btn-ghost{background:var(--bg-panel); color:var(--text); border-color:var(--border-strong)}
+.btn-ghost:hover{border-color:var(--teal)}
+.hero-cmd{margin:26px auto 0; max-width:520px}
+.terminal{background:var(--bg-panel); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow-soft); text-align:left; overflow:hidden}
+.terminal .bar{display:flex; align-items:center; gap:7px; padding:11px 14px; border-bottom:1px solid var(--border); background:var(--bg-inset)}
+.terminal .bar i{width:11px; height:11px; border-radius:50%; display:block}
+.terminal .bar i:nth-child(1){background:#ff5f57}.terminal .bar i:nth-child(2){background:#febc2e}.terminal .bar i:nth-child(3){background:#28c840}
+.terminal .bar span{margin-left:8px; font-size:.78rem; color:var(--text-faint); font-family:var(--font-mono)}
+.terminal pre{margin:0; padding:16px 18px; font-family:var(--font-mono); font-size:.9rem; line-height:1.8; overflow-x:auto}
+.terminal .c-prompt{color:var(--teal); user-select:none}
+.terminal .c-cmd{color:var(--text)}
+.terminal .c-cmt{color:var(--text-faint)}
+.trust{margin-top:30px; display:flex; gap:10px 22px; justify-content:center; flex-wrap:wrap; font-size:.82rem; color:var(--text-faint)}
+.trust b{color:var(--text-muted); font-weight:600}
+
+/* ── Section scaffolding ── */
+section{padding:72px 0}
+.sec-head{text-align:center; max-width:640px; margin:0 auto 46px}
+.sec-tag{font-size:.78rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--purple)}
+.sec-head h2{font-size:clamp(1.8rem,4vw,2.5rem); letter-spacing:-.03em; margin:.35em 0 .3em; font-weight:800}
+.sec-head p{color:var(--text-muted); font-size:1.06rem; margin:0}
+
+/* ── Problem band ── */
+.band{background:var(--bg-panel); border-top:1px solid var(--border); border-bottom:1px solid var(--border)}
+.paths{display:grid; grid-template-columns:1fr 1fr 1fr; gap:18px}
+@media(max-width:820px){.paths{grid-template-columns:1fr}}
+.path{border:1px solid var(--border); border-radius:var(--radius); padding:24px; background:var(--bg)}
+.path.bad{border-color:color-mix(in srgb,var(--red) 30%, var(--border))}
+.path.win{border-color:color-mix(in srgb,var(--teal) 45%, var(--border)); background:linear-gradient(180deg,var(--teal-soft),var(--bg-panel)); box-shadow:var(--shadow-soft)}
+.path .k{font-size:1.6rem}
+.path h3{margin:.5em 0 .35em; font-size:1.12rem; letter-spacing:-.01em}
+.path p{margin:0; color:var(--text-muted); font-size:.95rem}
+.path .tag{display:inline-block; margin-top:14px; font-size:.74rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:4px 10px; border-radius:999px}
+.path.bad .tag{color:var(--red); background:color-mix(in srgb,var(--red) 14%, transparent)}
+.path.win .tag{color:var(--teal); background:color-mix(in srgb,var(--teal) 16%, transparent)}
+
+/* ── Feature grid ── */
+.features{display:grid; grid-template-columns:repeat(3,1fr); gap:18px}
+@media(max-width:900px){.features{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.features{grid-template-columns:1fr}}
+.feat{border:1px solid var(--border); border-radius:var(--radius); padding:22px; background:var(--bg-panel); box-shadow:var(--shadow-soft); transition:transform .12s ease, border-color .2s ease}
+.feat:hover{transform:translateY(-3px); border-color:color-mix(in srgb,var(--teal) 45%, var(--border))}
+.feat .ic{width:42px; height:42px; border-radius:11px; display:grid; place-items:center; font-size:1.25rem; margin-bottom:14px;
+  background:var(--teal-soft); border:1px solid color-mix(in srgb,var(--teal) 25%, transparent)}
+.feat:nth-child(3n+2) .ic{background:var(--purple-soft); border-color:color-mix(in srgb,var(--purple) 25%, transparent)}
+.feat h3{margin:0 0 6px; font-size:1.08rem; letter-spacing:-.01em}
+.feat p{margin:0; color:var(--text-muted); font-size:.93rem}
+
+/* ── Comparison ── */
+.table-scroll{overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow-soft); background:var(--bg-panel)}
+table.cmp{border-collapse:collapse; width:100%; min-width:980px; font-size:.92rem}
+table.cmp th,table.cmp td{padding:14px 16px; text-align:center; border-bottom:1px solid var(--border)}
+table.cmp thead th{position:sticky; top:0; background:var(--bg-inset); font-size:.82rem; letter-spacing:.01em; z-index:2}
+table.cmp tbody th{text-align:left; font-weight:600; color:var(--text); white-space:nowrap; background:var(--bg-panel)}
+table.cmp th.us{color:var(--text)}
+table.cmp .us-col{background:linear-gradient(180deg,var(--teal-soft),color-mix(in srgb,var(--teal-soft) 30%, var(--bg-panel)))}
+table.cmp thead th.us{border-radius:10px 10px 0 0}
+.us-badge{display:inline-flex; align-items:center; gap:7px; font-weight:800; letter-spacing:-.01em}
+.us-badge svg{width:18px;height:18px}
+.cmp .yes{color:var(--green); font-weight:700; font-size:1.05rem}
+.cmp .no{color:var(--text-faint); font-weight:600}
+.cmp .part{color:var(--amber); font-weight:600}
+.cmp td small{display:block; font-weight:400; color:var(--text-faint); font-size:.76rem; margin-top:2px}
+.cmp tbody tr:last-child th,.cmp tbody tr:last-child td{border-bottom:none}
+.cmp-note{margin:14px auto 0; text-align:center; font-size:.82rem; color:var(--text-faint); max-width:760px}
+.legend{display:flex; gap:18px; justify-content:center; flex-wrap:wrap; margin-top:18px; font-size:.85rem; color:var(--text-muted)}
+.legend span{display:inline-flex; align-items:center; gap:7px}
+
+/* ── How it works ── */
+.steps{display:grid; grid-template-columns:repeat(4,1fr); gap:16px; counter-reset:step}
+@media(max-width:900px){.steps{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.steps{grid-template-columns:1fr}}
+.step{position:relative; border:1px solid var(--border); border-radius:var(--radius); padding:22px 20px; background:var(--bg-panel)}
+.step .n{width:34px; height:34px; border-radius:10px; display:grid; place-items:center; font-weight:800; font-family:var(--font-mono);
+  color:#fff; background:linear-gradient(120deg,var(--teal),var(--purple)); margin-bottom:14px}
+.step h3{margin:0 0 6px; font-size:1.05rem}
+.step p{margin:0; color:var(--text-muted); font-size:.9rem}
+.step code{font-family:var(--font-mono); font-size:.82rem; color:var(--purple); background:var(--purple-soft); padding:1px 6px; border-radius:5px}
+
+/* ── Tiers strip ── */
+.tiers{display:grid; grid-template-columns:repeat(3,1fr); gap:18px}
+@media(max-width:720px){.tiers{grid-template-columns:1fr}}
+.tier{border:1px solid var(--border); border-radius:var(--radius); padding:22px; background:var(--bg-panel)}
+.tier .h{font-size:1.3rem; font-weight:800; letter-spacing:-.01em; display:flex; align-items:center; gap:9px}
+.tier p{color:var(--text-muted); font-size:.92rem; margin:.6em 0 0}
+.tier .rail{height:6px; border-radius:999px; margin-top:16px; background:var(--bg-inset); overflow:hidden}
+.tier .rail i{display:block; height:100%; border-radius:999px}
+
+/* ── Organizations ── */
+.org-grid{display:grid; grid-template-columns:1.05fr .95fr; gap:34px; align-items:center}
+@media(max-width:860px){.org-grid{grid-template-columns:1fr; gap:26px}}
+.org-copy h3{font-size:1.35rem; letter-spacing:-.02em; margin:0 0 10px}
+.org-copy .lead{color:var(--text-muted); font-size:1.02rem; margin:0 0 22px}
+.org-list{list-style:none; margin:0; padding:0; display:grid; gap:16px}
+.org-list li{display:flex; gap:13px; align-items:flex-start}
+.org-list .ic{flex:none; width:34px; height:34px; border-radius:9px; display:grid; place-items:center; font-size:1.05rem; background:var(--purple-soft); border:1px solid color-mix(in srgb,var(--purple) 25%, transparent)}
+.org-list li:nth-child(2n) .ic{background:var(--teal-soft); border-color:color-mix(in srgb,var(--teal) 25%, transparent)}
+.org-list b{display:block; font-size:1rem; margin-bottom:2px}
+.org-list span{color:var(--text-muted); font-size:.92rem}
+/* routing tree card */
+.org-tree{border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-panel); box-shadow:var(--shadow-soft); overflow:hidden}
+.org-tree .cap{display:flex; align-items:center; gap:7px; padding:11px 14px; border-bottom:1px solid var(--border); background:var(--bg-inset); font-size:.82rem; color:var(--text-faint); font-family:var(--font-mono)}
+.org-tree .cap i{width:11px;height:11px;border-radius:50%;display:block}
+.org-tree .cap i:nth-child(1){background:#ff5f57}.org-tree .cap i:nth-child(2){background:#febc2e}.org-tree .cap i:nth-child(3){background:#28c840}
+.org-tree pre{margin:0; padding:18px; font-family:var(--font-mono); font-size:.86rem; line-height:1.9; overflow-x:auto}
+.org-tree .t-org{color:var(--purple); font-weight:700}
+.org-tree .t-team{color:var(--teal); font-weight:600}
+.org-tree .t-node{color:var(--text-muted)}
+.org-tree .t-cmt{color:var(--text-faint)}
+.org-ingest{margin-top:26px; border:1px solid color-mix(in srgb,var(--teal) 35%, var(--border)); border-radius:var(--radius); background:linear-gradient(180deg,var(--teal-soft),var(--bg-panel)); padding:22px 24px; display:flex; gap:18px; align-items:center; flex-wrap:wrap}
+.org-ingest .big{font-size:1.6rem}
+.org-ingest .txt{flex:1; min-width:240px}
+.org-ingest .txt b{font-size:1.05rem}
+.org-ingest .txt p{margin:4px 0 0; color:var(--text-muted); font-size:.93rem}
+.org-ingest code{font-family:var(--font-mono); font-size:.84rem; color:var(--teal); background:var(--bg-panel); border:1px solid var(--border); padding:3px 9px; border-radius:6px; white-space:nowrap}
+
+/* ── Token cost ── */
+.tok-grid{display:grid; grid-template-columns:1fr 1fr; gap:34px; align-items:center}
+@media(max-width:860px){.tok-grid{grid-template-columns:1fr; gap:28px}}
+.tok-mechs{list-style:none; margin:0; padding:0; display:grid; gap:14px}
+.tok-mechs li{border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-panel); padding:14px 16px; box-shadow:var(--shadow-soft)}
+.tok-mechs b{display:flex; align-items:center; gap:9px; font-size:.98rem}
+.tok-mechs span{display:block; color:var(--text-muted); font-size:.9rem; margin-top:3px; padding-left:28px}
+/* cost-vs-size chart */
+.chart-card{border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-panel); box-shadow:var(--shadow-soft); padding:22px}
+.chart-card h4{margin:0 0 3px; font-size:1.02rem}
+.chart-card .sub{margin:0 0 16px; color:var(--text-muted); font-size:.86rem}
+.chart-wrap{position:relative}
+.chart-wrap svg{width:100%; height:auto; display:block}
+.chart-legend{display:flex; gap:18px; flex-wrap:wrap; margin-top:14px; font-size:.84rem}
+.chart-legend span{display:inline-flex; align-items:center; gap:7px; color:var(--text-muted)}
+.chart-legend i{width:16px; height:3px; border-radius:2px; display:block}
+.tok-payoff{margin-top:26px; text-align:center; font-size:1.02rem; color:var(--text-muted); max-width:760px; margin-left:auto; margin-right:auto}
+.tok-payoff b{color:var(--text)}
+
+/* ── CTA ── */
+.cta{position:relative; overflow:hidden; text-align:center; border-radius:20px; padding:56px 28px; margin:0 0 8px;
+  background:var(--bg-panel); border:1px solid var(--border)}
+.cta::before{content:""; position:absolute; inset:0; background:var(--glow)}
+.cta .wrap2{position:relative; max-width:620px; margin:0 auto}
+.cta h2{font-size:clamp(1.7rem,4vw,2.4rem); letter-spacing:-.03em; margin:0 0 .35em; font-weight:800}
+.cta p{color:var(--text-muted); font-size:1.05rem; margin:0 0 26px}
+
+/* ── Footer ── */
+footer{border-top:1px solid var(--border); padding:36px 0; margin-top:56px; color:var(--text-faint); font-size:.88rem}
+.foot-inner{display:flex; align-items:center; gap:16px; flex-wrap:wrap; justify-content:space-between}
+.foot-links{display:flex; gap:18px; flex-wrap:wrap}
+.foot-links a{color:var(--text-muted); text-decoration:none}
+.foot-links a:hover{color:var(--teal)}
+</style>
+</head>
+<body>
+
+<!-- ══ NAV ══ -->
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M 16.9 4.9 A 8.6 8.6 0 1 0 20.6 11.9" fill="none" stroke="#2dd4bf" stroke-width="2.2" stroke-linecap="round"/><circle cx="19.5" cy="7.5" r="3.2" fill="#a855f7"/></svg>
+      <span class="wordmark"><span class="wm-open">open</span><span class="wm-mnemex">mnemex</span></span>
+    </a>
+    <nav class="nav-links">
+      <a class="hideable" href="#why">Why</a>
+      <a class="hideable" href="#teams">For teams</a>
+      <a class="hideable" href="#tokens">Token cost</a>
+      <a class="hideable" href="#features">Features</a>
+      <a class="hideable" href="#compare">Compare</a>
+      <a class="ghbtn" href="https://github.com/kritird/OpenMnemex" target="_blank" rel="noopener">★ GitHub</a>
+      <button class="theme-btn" id="themeToggle" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
+    </nav>
+  </div>
+</header>
+
+<!-- ══ HERO ══ -->
+<main id="top">
+<section class="hero">
+  <div class="wrap">
+    <span class="eyebrow"><span class="dot"></span> Auto-memory for LLM agents</span>
+    <h1 class="title">Your agent finally<br><span class="grad">remembers what mattered.</span></h1>
+    <p class="subtitle">OpenMnemex judges every session for what's worth keeping and files it into a self-pruning knowledge graph — <b>just Markdown in a git repo.</b> No vector database. No embedding pipeline. No server.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#install">⚡ Get started in 60 seconds</a>
+      <a class="btn btn-ghost" href="https://github.com/kritird/OpenMnemex" target="_blank" rel="noopener">View on GitHub →</a>
+    </div>
+    <div class="hero-cmd">
+      <div class="terminal">
+        <div class="bar"><i></i><i></i><i></i><span>zsh — openmnemex</span></div>
+        <pre><span class="c-prompt">$</span> <span class="c-cmd">uvx openmnemex@latest</span>     <span class="c-cmt"># runs it, installs nothing</span></pre>
+      </div>
+    </div>
+    <div class="trust">
+      <span>🚫 <b>Zero</b> vector DB</span>
+      <span>🖥️ <b>Zero</b> servers</span>
+      <span>📄 <b>100%</b> plain Markdown</span>
+      <span>🌿 Every write a <b>git commit</b></span>
+      <span>🧩 Claude Code <b>plugin</b></span>
+    </div>
+  </div>
+</section>
+
+<!-- ══ WHY / PROBLEM ══ -->
+<section id="why" class="band">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag">The problem</div>
+      <h2>Agents are brilliant in the moment — and forget everything after it.</h2>
+      <p>The two usual fixes each carry a sharp, permanent cost. OpenMnemex takes a third path.</p>
+    </div>
+    <div class="paths">
+      <div class="path bad">
+        <div class="k">💸</div>
+        <h3>Stuff everything into context</h3>
+        <p>You pay for the whole pile on every single turn — context bloat, runaway cost, and diluted attention as the history grows.</p>
+        <span class="tag">Gets worse over time</span>
+      </div>
+      <div class="path bad">
+        <div class="k">🛠️</div>
+        <h3>Embed it all into a vector store</h3>
+        <p>Now you operate an embedding pipeline, an index, and a database — and retrieval is opaque: you can't read it, diff it, or trust it.</p>
+        <span class="tag">Infra + opacity</span>
+      </div>
+      <div class="path win">
+        <div class="k">🧠</div>
+        <h3>Remember like a human does</h3>
+        <p>Knowledge is <b>files</b>. Relevance is a number computed on demand. Used things stay hot and cheap; unused things quietly decay and die — unless something still points at them.</p>
+        <span class="tag">The OpenMnemex way</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ ORGANIZATIONS ══ -->
+<section id="teams">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag">For teams &amp; organizations</div>
+      <h2>Give your whole org a shared memory — in an afternoon.</h2>
+      <p>One git repo becomes your company's institutional knowledge. Every engineer's agent reads and writes it, routed like your org chart — and you seed it from the repos you already have.</p>
+    </div>
+    <div class="org-grid">
+      <div class="org-copy">
+        <ul class="org-list">
+          <li><span class="ic">🏗️</span><div><b>Bulk-ingest what you already have</b><span>Point Mnemex at your service repos and docs. It <em>distills</em> years of ADRs, API contracts, and code comments into a connected graph — one command per repo, no live session needed.</span></div></li>
+          <li><span class="ic">🗂️</span><div><b>Structured org → team → domain</b><span>The graph routes the way your company is shaped: an org router picks the team, a team router picks the domain. New engineers' agents inherit the whole institutional memory on day one.</span></div></li>
+          <li><span class="ic">👥</span><div><b>Shared graph, isolated drafts</b><span>Everyone's agents read the same promoted graph, but each person's captures stage <em>locally</em> until a deliberate promote. No one steps on anyone's memory.</span></div></li>
+          <li><span class="ic">🔁</span><div><b>Stays in sync as you evolve</b><span>Re-run ingest after the code changes and it imports <em>only the diff</em> — idempotently. A deleted source surfaces as an orphan candidate to judge, never a silent deletion.</span></div></li>
+          <li><span class="ic">🔒</span><div><b>Safe by construction</b><span>Ingest <em>only stages</em> (promote stays the sole writer), <em>never reads secrets</em>, and <em>never mutates your source</em>.</span></div></li>
+        </ul>
+      </div>
+      <div>
+        <div class="org-tree">
+          <div class="cap"><i></i><i></i><i></i> acme-knowledge/ · one git repo</div>
+<pre><span class="t-org">index.md</span>                 <span class="t-cmt"># org router — which teams exist</span>
+<span class="t-team">team-payments/</span>
+  <span class="t-node">index.md</span>              <span class="t-cmt"># team router — HOT / WARM / COLD</span>
+  <span class="t-node">settlement/</span> …        <span class="t-cmt"># domain: nodes + patterns</span>
+  <span class="t-node">ledger/</span> …
+<span class="t-team">team-risk/</span>
+  <span class="t-node">index.md</span>
+  <span class="t-node">fraud-signals/</span> …
+<span class="t-team">team-platform/</span>
+  <span class="t-node">auth/</span> · <span class="t-node">observability/</span> …</pre>
+        </div>
+        <div class="org-ingest">
+          <div class="big">⚡</div>
+          <div class="txt">
+            <b>Onboard a whole service in one line</b>
+            <p>Two gates — approve the scope &amp; routing map once, one bulk summary at the end. Never per-atom review. A monorepo is one decision, not ten thousand.</p>
+          </div>
+          <code>/mnemex:mnx-ingest github.com/acme/payments-service</code>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ TOKEN ECONOMICS ══ -->
+<section id="tokens" class="band">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag">Token economics</div>
+      <h2>Reads stay cheap — even at thousands of nodes.</h2>
+      <p>Context-stuffing and vector-RAG both get <em>more</em> expensive as your knowledge grows. Mnemex is architected the other way: a read's cost scales with the <b>path you take</b>, not the <b>size of the graph</b>.</p>
+    </div>
+    <div class="tok-grid">
+      <ul class="tok-mechs">
+        <li><b>🧭 Route, don't retrieve</b><span>You read one-line index heads to <em>pick a path</em> (org → team → cluster). Nothing is pasted into context on spec.</span></li>
+        <li><b>🔥 Hot = top-K, chunk 1</b><span>The routing head is capacity-bounded, so the baseline read stays small no matter how big the graph gets.</span></li>
+        <li><b>📚 Chunked reads, stop early</b><span>Read Hot first — it's usually enough. Warm/Cold load only on demand. You rarely load a whole index, never the whole graph.</span></li>
+        <li><b>🏷️ Match on summaries</b><span>Each index row carries the node's summary + aliases, so you match the right node <em>without opening a single body</em>.</span></li>
+        <li><b>🔎 Expand only on commit</b><span>Load only the bodies you'll actually use, inside a per-hop token budget — beam search, not "load every neighbor".</span></li>
+        <li><b>🗑️ Self-pruning surface</b><span>Decay and death keep the routing surface small over time — no landfill of dead knowledge to page through.</span></li>
+      </ul>
+      <div class="chart-card">
+        <h4>Tokens spent per read, as the graph grows</h4>
+        <p class="sub">Illustrative — the shape is the point, not the exact numbers.</p>
+        <div class="chart-wrap">
+          <svg viewBox="0 0 460 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Line chart: context-stuffing and vector-RAG rise steeply with graph size; Mnemex stays flat and low.">
+            <!-- grid + axes -->
+            <line x1="48" y1="214" x2="446" y2="214" stroke="var(--border-strong)" stroke-width="1"/>
+            <line x1="48" y1="20" x2="48" y2="214" stroke="var(--border-strong)" stroke-width="1"/>
+            <line x1="48" y1="150" x2="446" y2="150" stroke="var(--border)" stroke-width="1" stroke-dasharray="3 4"/>
+            <line x1="48" y1="86" x2="446" y2="86" stroke="var(--border)" stroke-width="1" stroke-dasharray="3 4"/>
+            <!-- context stuffing (steep) -->
+            <polyline fill="none" stroke="var(--red)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" points="48,198 150,158 250,112 350,68 446,32"/>
+            <!-- vector RAG (moderate) -->
+            <polyline fill="none" stroke="var(--amber)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" points="48,205 150,186 250,160 350,132 446,102"/>
+            <!-- mnemex (flat, low) -->
+            <polyline fill="none" stroke="var(--teal)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="48,197 150,193 250,191 350,190 446,189"/>
+            <circle cx="446" cy="189" r="3.5" fill="var(--teal)"/>
+            <!-- axis labels -->
+            <text x="247" y="238" text-anchor="middle" font-size="11" fill="var(--text-faint)" font-family="var(--font-ui)">graph size (nodes) →</text>
+            <text x="20" y="120" text-anchor="middle" font-size="11" fill="var(--text-faint)" font-family="var(--font-ui)" transform="rotate(-90 20 120)">tokens / read →</text>
+          </svg>
+        </div>
+        <div class="chart-legend">
+          <span><i style="background:var(--red)"></i> Stuff everything into context</span>
+          <span><i style="background:var(--amber)"></i> Vector-RAG (top-k inject)</span>
+          <span><i style="background:var(--teal)"></i> OpenMnemex (route, don't retrieve)</span>
+        </div>
+      </div>
+    </div>
+    <p class="tok-payoff">💡 <b>The payoff:</b> a read is a few small index-head reads <b>plus only the node bodies you commit to</b> — not the corpus, not a wall of retrieved chunks. Retrieval stays cheap exactly where naive context-stuffing and RAG get most expensive.</p>
+  </div>
+</section>
+
+<!-- ══ FEATURES ══ -->
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag">What makes it different</div>
+      <h2>Memory that curates, ages, and re-checks itself.</h2>
+      <p>Everything a real memory system needs — none of the infrastructure everyone told you it required.</p>
+    </div>
+    <div class="features">
+      <div class="feat"><div class="ic">🧠</div><h3>It decides, not you</h3><p>When a session ends, it asks the questions a person would — is this relevant, significant, novel? — and keeps only what passes. You build; it remembers.</p></div>
+      <div class="feat"><div class="ic">📄</div><h3>Plain Markdown in git</h3><p>Every node is a readable, diffable Markdown file. No proprietary store, no black box — <code>git log</code> is your full memory history.</p></div>
+      <div class="feat"><div class="ic">📉</div><h3>Self-pruning by design</h3><p>An Ebbinghaus forgetting curve and spaced-repetition boosts move knowledge through 🔥 hot / 🌤️ warm / ❄️ cold tiers. The landfill never forms.</p></div>
+      <div class="feat"><div class="ic">⏳</div><h3>Knows when it's stale</h3><p>Every fact carries a <code>verified</code> clock. Past its horizon it's flagged for a re-check — so your agent re-confirms instead of confidently repeating something outdated.</p></div>
+      <div class="feat"><div class="ic">🪙</div><h3>Token-frugal reads</h3><p>Route, don't retrieve. You read tiny one-line index heads to pick a path and open only the node bodies you commit to. Cost scales with your <em>path</em>, not the graph's <em>size</em>.</p></div>
+      <div class="feat"><div class="ic">🌿</div><h3>Every write is reviewable</h3><p>Capture stages locally; a deliberate promote commits and pushes. You can inspect or un-stage anything first. Automatic, but never unaccountable.</p></div>
+      <div class="feat"><div class="ic">🏗️</div><h3>Bootstrap from a repo</h3><p>Point it at an existing codebase or docs and it <em>distills</em> years of ADRs, comments, and contracts into a connected graph — one command, idempotent re-runs, never a RAG dump.</p></div>
+      <div class="feat"><div class="ic">🖥️</div><h3>A Console to see it all</h3><p>A local web app draws your whole graph: node size and teal depth show usage, amber rings show what's due for a re-check, a time scrubber ages it months forward.</p></div>
+      <div class="feat"><div class="ic">🧩</div><h3>Drops into your agent</h3><p>A first-class Claude Code plugin with auto-capture hooks and skills — plus a stdio MCP server for every other MCP-capable agent.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ COMPARISON ══ -->
+<section id="compare" class="band">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag">How it stacks up</div>
+      <h2>The only memory that's yours to read.</h2>
+      <p>Other agent-memory projects lean on a database, a server, or manual note-taking. OpenMnemex needs none of them.</p>
+    </div>
+    <div class="table-scroll">
+      <table class="cmp">
+        <thead>
+          <tr>
+            <th style="text-align:left">Capability</th>
+            <th class="us us-col"><span class="us-badge"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M 16.9 4.9 A 8.6 8.6 0 1 0 20.6 11.9" fill="none" stroke="#2dd4bf" stroke-width="2.4" stroke-linecap="round"/><circle cx="19.5" cy="7.5" r="3.2" fill="#a855f7"/></svg>OpenMnemex</span></th>
+            <th>claude-mem</th>
+            <th>mem0</th>
+            <th>Zep / Graphiti</th>
+            <th>Letta&nbsp;(MemGPT)</th>
+            <th>Basic&nbsp;Memory</th>
+            <th>MCP Memory<br>Server</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Storage you can read &amp; <code>git diff</code></th>
+            <td class="us-col"><span class="yes">✓</span><small>Markdown in git</small></td>
+            <td><span class="no">✗</span><small>SQLite + Chroma</small></td>
+            <td><span class="no">✗</span><small>DB rows</small></td>
+            <td><span class="no">✗</span><small>graph DB</small></td>
+            <td><span class="no">✗</span><small>Postgres</small></td>
+            <td><span class="yes">✓</span><small>Markdown</small></td>
+            <td><span class="part">~</span><small>JSON file</small></td>
+          </tr>
+          <tr>
+            <th>No vector database required</th>
+            <td class="us-col"><span class="yes">✓</span></td>
+            <td><span class="no">✗</span><small>Chroma</small></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="yes">✓</span></td>
+            <td><span class="yes">✓</span></td>
+          </tr>
+          <tr>
+            <th>No server / infra to run</th>
+            <td class="us-col"><span class="yes">✓</span></td>
+            <td><span class="part">~</span><small>local index</small></td>
+            <td><span class="part">~</span><small>self-host or cloud</small></td>
+            <td><span class="no">✗</span><small>server</small></td>
+            <td><span class="no">✗</span><small>server</small></td>
+            <td><span class="yes">✓</span></td>
+            <td><span class="yes">✓</span></td>
+          </tr>
+          <tr>
+            <th>Auto-decides what's worth keeping</th>
+            <td class="us-col"><span class="yes">✓</span><small>salience scoring</small></td>
+            <td><span class="part">~</span><small>auto-compress</small></td>
+            <td><span class="part">~</span><small>LLM extract</small></td>
+            <td><span class="part">~</span></td>
+            <td><span class="part">~</span></td>
+            <td><span class="no">✗</span><small>you write notes</small></td>
+            <td><span class="no">✗</span><small>agent must call it</small></td>
+          </tr>
+          <tr>
+            <th>Forgets &amp; decays unused knowledge</th>
+            <td class="us-col"><span class="yes">✓</span><small>Ebbinghaus curve</small></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="part">~</span><small>temporal invalidate</small></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+          </tr>
+          <tr>
+            <th>Flags stale facts for re-check</th>
+            <td class="us-col"><span class="yes">✓</span><small>freshness clock</small></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="part">~</span></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+          </tr>
+          <tr>
+            <th>Token-frugal, route-don't-retrieve reads</th>
+            <td class="us-col"><span class="yes">✓</span></td>
+            <td><span class="no">✗</span><small>semantic top-k</small></td>
+            <td><span class="no">✗</span><small>top-k inject</small></td>
+            <td><span class="no">✗</span><small>top-k inject</small></td>
+            <td><span class="part">~</span></td>
+            <td><span class="part">~</span></td>
+            <td><span class="no">✗</span><small>loads graph</small></td>
+          </tr>
+          <tr>
+            <th>Bootstrap a graph from an existing repo</th>
+            <td class="us-col"><span class="yes">✓</span><small>distill, not RAG</small></td>
+            <td><span class="no">✗</span><small>sessions only</small></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="no">✗</span></td>
+            <td><span class="part">~</span><small>import notes</small></td>
+            <td><span class="no">✗</span></td>
+          </tr>
+          <tr>
+            <th>Visual console for your memory</th>
+            <td class="us-col"><span class="yes">✓</span><small>hotness × freshness canvas</small></td>
+            <td><span class="part">~</span><small>timeline viewer</small></td>
+            <td><span class="part">~</span><small>cloud dashboard</small></td>
+            <td><span class="part">~</span></td>
+            <td><span class="yes">✓</span><small>ADE</small></td>
+            <td><span class="part">~</span><small>Obsidian</small></td>
+            <td><span class="no">✗</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <span><span class="yes">✓</span> Built in</span>
+      <span><span class="part">~</span> Partial / with caveats</span>
+      <span><span class="no">✗</span> Not offered</span>
+    </div>
+    <p class="cmp-note">Comparison reflects each project's core architecture and default configuration as publicly documented; capabilities differ across tiers, plugins, and versions (e.g. <a href="https://github.com/thedotmack/claude-mem" target="_blank" rel="noopener" style="color:var(--teal)">claude-mem</a> auto-captures and semantically retrieves Claude Code sessions). Names and marks belong to their respective owners.</p>
+  </div>
+</section>
+
+<!-- ══ HOW IT WORKS ══ -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag">The loop</div>
+      <h2>Four verbs, mapped to how memory actually works.</h2>
+      <p>Knowledge writing is split like git itself: capture is the commit, promote is the push.</p>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><h3>Read</h3><p>Route through indexes, overlay staged atoms, expand only what you need, flag anything stale. <code>/mnx-read</code></p></div>
+      <div class="step"><div class="n">2</div><h3>Capture</h3><p>Score each atom <em>now / later / not-needed</em> and stage it locally with its own provenance. <code>/mnx-capture</code></p></div>
+      <div class="step"><div class="n">3</div><h3>Promote</h3><p>Reconcile, merge, consolidate, doctor, and push — one atomic, reviewable git commit. <code>/mnx-promote</code></p></div>
+      <div class="step"><div class="n">4</div><h3>Doctor</h3><p>Validate every invariant and self-heal the derived files, so the graph is always trustworthy. <code>/mnx-doctor</code></p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ TIERS ══ -->
+<section class="band">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag">Human-memory model</div>
+      <h2>Hot rises. Cold fades. Structure protects.</h2>
+      <p>Tier is literally read cost — the more it's used, the cheaper and closer to hand it stays.</p>
+    </div>
+    <div class="tiers">
+      <div class="tier"><div class="h">🔥 Hot</div><p>Frequently recalled, top-of-mind knowledge. Lives in the routing head, read first, almost always enough on its own.</p><div class="rail"><i style="width:100%;background:var(--teal)"></i></div></div>
+      <div class="tier"><div class="h">🌤️ Warm</div><p>Still useful, read only on demand. Ready to rise again the moment it gets used, or to keep drifting if it doesn't.</p><div class="rail"><i style="width:58%;background:var(--node-cooling,#7edcd0)"></i></div></div>
+      <div class="tier"><div class="h">❄️ Cold</div><p>Rarely touched. Cheap to keep out of the way, and eventually allowed to die — unless something structurally important still points at it.</p><div class="rail"><i style="width:24%;background:var(--text-faint)"></i></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ INSTALL / CTA ══ -->
+<section id="install">
+  <div class="wrap">
+    <div class="cta">
+      <div class="wrap2">
+        <h2>Give your agent a memory in 60 seconds.</h2>
+        <p>Open the Console, create a graph, and connect your agents with one click.</p>
+        <div class="terminal" style="text-align:left; max-width:560px; margin:0 auto 26px">
+          <div class="bar"><i></i><i></i><i></i><span>zsh</span></div>
+<pre><span class="c-cmt"># 1 · Open the OpenMnemex Console (Python 3.9+)</span>
+<span class="c-prompt">$</span> <span class="c-cmd">uvx openmnemex@latest</span>
+
+<span class="c-cmt"># 2 · Inside Claude Code — add the plugin</span>
+<span class="c-prompt">&gt;</span> <span class="c-cmd">/plugin marketplace add kritird/OpenMnemex</span>
+<span class="c-prompt">&gt;</span> <span class="c-cmd">/plugin install mnemex@mnemex-marketplace</span></pre>
+        </div>
+        <div class="cta-row" style="margin:0">
+          <a class="btn btn-primary" href="https://github.com/kritird/OpenMnemex" target="_blank" rel="noopener">★ Star on GitHub</a>
+          <a class="btn btn-ghost" href="https://pypi.org/project/openmnemex/" target="_blank" rel="noopener">View on PyPI</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<!-- ══ FOOTER ══ -->
+<footer>
+  <div class="wrap foot-inner">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px"><path d="M 16.9 4.9 A 8.6 8.6 0 1 0 20.6 11.9" fill="none" stroke="#2dd4bf" stroke-width="2.2" stroke-linecap="round"/><circle cx="19.5" cy="7.5" r="3.2" fill="#a855f7"/></svg>
+      <span class="wordmark" style="font-size:.92rem"><span class="wm-open">open</span><span class="wm-mnemex">mnemex</span></span>
+      <span style="color:var(--text-faint); font-size:.85rem; margin-left:2px">· MIT licensed</span>
+    </div>
+    <div class="foot-links">
+      <a href="https://github.com/kritird/OpenMnemex" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/kritird/OpenMnemex/blob/main/FEATURES.md" target="_blank" rel="noopener">Features</a>
+      <a href="https://github.com/kritird/OpenMnemex/blob/main/docs/overview.md" target="_blank" rel="noopener">Docs</a>
+      <a href="https://pypi.org/project/openmnemex/" target="_blank" rel="noopener">PyPI</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var btn = document.getElementById("themeToggle");
+  function current(){
+    var t = document.documentElement.dataset.theme;
+    if (t) return t;
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  btn.addEventListener("click", function(){
+    var next = current() === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("mnx-site-theme", next); } catch(e){}
+  });
+})();
+</script>
+</body>
+</html>

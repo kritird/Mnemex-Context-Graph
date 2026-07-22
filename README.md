@@ -16,6 +16,8 @@
   <img alt="token cost" src="https://img.shields.io/badge/reads-token--frugal-0e7a0d">
 </p>
 
+<p align="center"><b>🌐 New to OpenMnemex? Start at the website → <a href="https://kritird.github.io/OpenMnemex/">kritird.github.io/OpenMnemex</a></b></p>
+
 > 🧠 Self-curating, navigable, context-budget-aware **agent memory** that judges your session for
 > what's worth keeping — with no vector database, no embedding pipeline, and no server. Just Markdown
 > in a git repo. Works as a Claude Code plugin.
