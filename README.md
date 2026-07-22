@@ -47,7 +47,7 @@ commit.
 Everything starts at the **OpenMnemex Console** — a local web app that opens in your browser:
 
 ```bash
-uvx openmnemex            # runs it without installing anything
+uvx openmnemex@latest     # runs it without installing anything
 ```
 
 …or install it properly, then run it — two steps, because `pip` only installs:
@@ -306,7 +306,7 @@ ghosts are `[[links]]` nobody has written yet.
 </p>
 
 ```bash
-uvx openmnemex            # or, if you'd rather install it: pip install openmnemex
+uvx openmnemex@latest     # or, if you'd rather install it: pip install openmnemex
 ```
 
 Click any node for its mesh and full rendered atom; search the graph; open the **revalidation
@@ -338,7 +338,7 @@ Phase-by-phase breakdowns are in
 ```bash
 # 1. Open the OpenMnemex Console (needs Python 3.9+). Either run it without
 #    installing…
-uvx openmnemex
+uvx openmnemex@latest
 #    …or install it once, then run it (two steps — `pip` only installs):
 pip install openmnemex
 openmnemex
@@ -371,10 +371,10 @@ instructions (install → what changed → how to verify → which tier to expec
 
 ```bash
 # 60-second start: create a local-folder graph, bind it, and pin it into the entry — zero prompts.
-uvx openmnemex install --agent <agent> --init-graph --yes
+uvx openmnemex@latest install --agent <agent> --init-graph --yes
 
 # …or wire up the server against a graph you already have:
-uvx openmnemex install --agent <agent> [--project|--user] [--pin-graph]
+uvx openmnemex@latest install --agent <agent> [--project|--user] [--pin-graph]
 ```
 
 `--init-graph` is the no-decisions path: it proposes a plain local folder under your mnemex home
