@@ -188,6 +188,41 @@ export function createCanvas(container, { onNodeTap, onBackgroundTap } = {}) {
   window.__mnxCy = cy;   // debug/test handle — the fidelity pass reads it (plan §8)
   let payloadAt = null;
 
+  // F5: fit reliably, and don't over-zoom a tiny graph. cytoscape's fit() works off the
+  // container size it has cached — on an SPA route mount that size can still be 0 when
+  // layoutstop fires, so fit() no-ops and the nodes strand at the origin (clipped under the
+  // toolbar) with the view left at zoom 1 / pan 0. resize() forces a re-measure first. The
+  // zoom clamp keeps a 1–2 node scope from ballooning to fill the screen (fit would zoom to
+  // ~14x for two nodes) — for a large graph fit lands below the cap, so it never bites there.
+  const MAX_FIT_ZOOM = 1.6;
+  // Returns true only when it actually framed (nodes present AND the container has a real
+  // size). A no-op (0-sized container) returns false so callers don't mark the graph "framed"
+  // and let the ResizeObserver retry once the box has dimensions.
+  const fitInView = () => {
+    if (!cy.nodes().length) return false;
+    const { width, height } = container.getBoundingClientRect();
+    if (width < 1 || height < 1) return false;
+    cy.resize();
+    cy.fit(undefined, 40);
+    if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(); }
+    return true;
+  };
+
+  // The mount race: the graph is often laid out before its container has a real size (opened
+  // via a full page load / a background tab / a slow first paint). A ResizeObserver re-measures
+  // the canvas whenever the container's box changes and refits the first time it becomes
+  // non-zero, so freshly-added atoms are always framed, not stranded in the corner.
+  let framed = false;
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(() => {
+      const { width, height } = container.getBoundingClientRect();
+      if (width < 1 || height < 1) return;
+      cy.resize();
+      if (!framed && cy.nodes().length) { fitInView(); framed = true; }
+    });
+    ro.observe(container);
+  }
+
   // Tooltip is a plain positioned <div> over the canvas — cytoscape has no HTML
   // labels, and canvas-drawn text can't do the small key/value card we need.
   const tip = document.createElement("div");
@@ -284,8 +319,14 @@ export function createCanvas(container, { onNodeTap, onBackgroundTap } = {}) {
           padding: 40,
         });
         layout.one("layoutstop", () => {
-          cy.fit(undefined, 40);
-          resolve({ ...counts, layoutMs: Math.round(performance.now() - t0) });
+          // Defer a frame so the container has been measured/painted before we fit — fitting
+          // synchronously here races the SPA mount and leaves the view at zoom 1 / pan 0 (F5).
+          requestAnimationFrame(() => {
+            // Mark framed only if the fit truly landed; a 0-sized container leaves it false so
+            // the ResizeObserver reframes once the box is measured.
+            if (fitInView()) framed = true;
+            resolve({ ...counts, layoutMs: Math.round(performance.now() - t0) });
+          });
         });
         layout.run();
       });

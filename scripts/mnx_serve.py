@@ -330,14 +330,22 @@ def create_graph_payload(path: str, org: Optional[str] = None,
             f"{target} is not empty — the viewer only creates graphs in fresh/empty folders "
             "and never touches existing data.",
             "pick an empty or new folder", http_status=409)
+    team_name = team or mnx_init.DEFAULT_TEAM
     try:
-        result = mnx_init.init_graph(path=str(target), team=team or mnx_init.DEFAULT_TEAM,
-                                     org=org)
+        result = mnx_init.init_graph(path=str(target), team=team_name, org=org)
     except (mnx_init._InitError, ValueError) as exc:
         code = getattr(exc, "code", "init-failed")
         action = getattr(exc, "action", "fix the arguments and retry")
         raise ViewerError(code, str(exc), action)
+    # F6: make a Console-created graph the user default when the user has none, so the natural
+    # journey — create here, then Connect an agent — leaves that agent actually pointed at this
+    # graph (an MCP entry pins no graph; without a user default the agent resolves `unresolved`).
+    # write_user_default never clobbers an existing default (returns action="exists"), so a user
+    # who already has one — e.g. creating a second graph — keeps it; we just surface the outcome.
+    user_default = mnx_binding.write_user_default(path=result["graph_root"],
+                                                  default_team=team_name)
     return {"ok": True, "action": "created", "init": result,
+            "user_default": user_default,
             "graph": graph_card(result["graph_root"])}
 
 

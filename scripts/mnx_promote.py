@@ -419,7 +419,14 @@ def begin(binding: Optional["mnx_binding.Binding"] = None, team: Optional[str] =
         handle = mnx_lock.acquire(team_path)
     except mnx_lock.Busy as busy:
         return {"guard": "busy", "action": "wait and retry", "team": team_name,
+                "hint": ("if no promote is actually running, this lock was abandoned by a crashed "
+                         "session — it auto-recovers on a later attempt once it passes the reclaim "
+                         "TTL (MNEMEX_LOCK_TTL_SECONDS, default 1h)"),
                 "detail": str(busy), "recovered": recovered, "stamps_flushed": stamps_flushed}
+    if handle.get("reclaimed"):
+        # F4: begin() acquired the team lock only after reclaiming a stale one left by a crashed
+        # or disconnected promote (dead process, no stranded plan for recover() to catch).
+        recovered = {**(recovered or {}), "stale_lock": handle["reclaimed"]}
 
     return {"guard": "none", "action": "locked", "team": team_name, "lock": handle,
             "recovered": recovered, "stamps_flushed": stamps_flushed,

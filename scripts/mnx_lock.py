@@ -12,6 +12,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -20,6 +22,73 @@ import mnx_common
 
 class Busy(Exception):
     """Raised when the team lock is already held."""
+
+
+# --- stale-lock reclaim (F4) -------------------------------------------------
+# A lock file persists on disk after the process that wrote it exits — that is deliberate:
+# the skill runs promote `begin` and `apply` as SEPARATE short-lived processes, so the lock
+# has to outlive the process that took it. The flip side is that a crash/disconnect between
+# begin and apply leaves the lock stranded with no owner and nothing to clear it (recover()
+# only reclaims a lock that has a stranded *plan* beside it; the begin→apply window has none),
+# wedging every later acquire with Busy forever.
+#
+# The safe staleness signal is AGE, not pid-liveness: because the legitimate begin→apply flow
+# routinely leaves a dead pid on disk mid-transaction, a pid-liveness probe would false-positive
+# and steal a lock that a human is still holding to review a plan. Locks live under the
+# gitignored .mnemex/locks/, so they are always local to this machine and age is unambiguous.
+# The TTL is generous enough to never bite a real review, yet bounds an abandoned-lock wedge to
+# at most the TTL instead of forever.
+STALE_LOCK_TTL_SECONDS = 3600  # 1h; override with MNEMEX_LOCK_TTL_SECONDS
+
+
+def _lock_ttl_seconds() -> int:
+    raw = os.environ.get("MNEMEX_LOCK_TTL_SECONDS")
+    if raw:
+        try:
+            v = int(raw)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    return STALE_LOCK_TTL_SECONDS
+
+
+def _lock_age_seconds(path: Path, meta: dict) -> Optional[float]:
+    """Age of the lock in seconds, from its recorded `acquired` timestamp; falls back to the
+    file mtime for a corrupt/undated lock so even a malformed one still ages out."""
+    acquired = meta.get("acquired")
+    if acquired:
+        try:
+            dt = mnx_common.parse_ts(acquired)
+            return (datetime.now(timezone.utc) - dt).total_seconds()
+        except Exception:
+            pass
+    try:
+        return time.time() - path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def _reclaim_if_stale(path: Path) -> Optional[dict]:
+    """If the lock at `path` is older than the reclaim TTL (abandoned), delete it and return
+    reclaim metadata; otherwise return None (a live lock the caller must treat as Busy)."""
+    if not path.exists():
+        return None
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        meta = {}
+    age = _lock_age_seconds(path, meta if isinstance(meta, dict) else {})
+    ttl = _lock_ttl_seconds()
+    if age is None or age <= ttl:
+        return None
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    prior = {k: meta.get(k) for k in ("team", "cluster", "pid", "acquired")
+             if isinstance(meta, dict) and k in meta}
+    return {"path": str(path), "age_seconds": round(age, 1), "ttl_seconds": ttl, "prior": prior}
 
 
 def _team_name(team: str) -> str:
@@ -92,14 +161,25 @@ def acquire_cluster(cluster: str) -> dict[str, Any]:
     this cluster is already locked. Lets disjoint clusters be written concurrently."""
     gp = _acquire_guard(cluster)          # helpers take any path within the graph, not the team name
     try:
-        if _lock_path(cluster).exists():
-            raise Busy(f"team exclusively locked: {_team_name(cluster)}")
+        reclaimed = []
+        lp = _lock_path(cluster)
+        if lp.exists():
+            r = _reclaim_if_stale(lp)
+            if r is None:
+                raise Busy(f"team exclusively locked: {_team_name(cluster)}")
+            reclaimed.append({"lock": "team", **r})
         marker = _cluster_marker(cluster)
         if marker.exists():
-            raise Busy(f"cluster lock already held: {marker}")
+            r = _reclaim_if_stale(marker)
+            if r is None:
+                raise Busy(f"cluster lock already held: {marker}")
+            reclaimed.append({"lock": "cluster", **r})
         marker.write_text(json.dumps({"cluster": str(cluster), "pid": os.getpid(),
                                       "acquired": mnx_common.now_utc()}), encoding="utf-8")
-        return {"path": str(marker), "scope": "cluster", "cluster": str(cluster)}
+        handle = {"path": str(marker), "scope": "cluster", "cluster": str(cluster)}
+        if reclaimed:
+            handle["reclaimed"] = reclaimed
+        return handle
     finally:
         _release_guard(gp)
 
@@ -130,11 +210,17 @@ def acquire(team: str) -> dict[str, Any]:
     lp.parent.mkdir(parents=True, exist_ok=True)
     gp = _acquire_guard(team)
     try:
+        reclaimed = []
         if lp.exists():
-            raise Busy(f"team lock already held: {lp}")
-        clusters = _cluster_markers(team)
-        if clusters:
-            raise Busy(f"team has {len(clusters)} cluster lock(s) held: {lp}")
+            r = _reclaim_if_stale(lp)
+            if r is None:
+                raise Busy(f"team lock already held: {lp}")
+            reclaimed.append({"lock": "team", **r})
+        for c in _cluster_markers(team):
+            r = _reclaim_if_stale(c)
+            if r is None:
+                raise Busy(f"team has cluster lock(s) held: {lp}")
+            reclaimed.append({"lock": "cluster", **r})
         try:
             fd = os.open(str(lp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
@@ -142,7 +228,10 @@ def acquire(team: str) -> dict[str, Any]:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(json.dumps({"team": _team_name(team), "pid": os.getpid(),
                                  "acquired": mnx_common.now_utc()}))
-        return {"path": str(lp), "team": _team_name(team), "scope": "team"}
+        handle = {"path": str(lp), "team": _team_name(team), "scope": "team"}
+        if reclaimed:
+            handle["reclaimed"] = reclaimed
+        return handle
     finally:
         _release_guard(gp)
 
